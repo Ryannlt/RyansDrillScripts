@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using MDS.ConfigVariables;
+using MDS;
 
 [TestFixture]
 public class ConfigManagerTests

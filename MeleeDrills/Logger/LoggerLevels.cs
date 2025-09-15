@@ -1,7 +1,10 @@
-public enum LogLevel
+namespace MDS
 {
-    INFO,
-    WARNING,
-    ERROR,
-    DEBUG
+    public enum LogLevel
+    {
+        INFO,
+        WARNING,
+        ERROR,
+        DEBUG
+    }
 }
