@@ -2,6 +2,7 @@ using NUnit.Framework;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.TestTools;
+using MDS;
 
 [TestFixture]
 public class LoggerTests
@@ -35,7 +36,7 @@ public class LoggerTests
     [Test]
     public void Test_Info_Log_Format()
     {
-        Logger.Log("Test Info Message", LogLevel.INFO);
+        MDS.Logger.Log("Test Info Message", LogLevel.INFO);
 
         Assert.IsTrue(logMessages.Count > 0, "Log should have been captured.");
         Assert.That(GetLastLog(), Does.Contain("[MDS]"), "Log should contain the mod name [MDS].");
@@ -46,7 +47,7 @@ public class LoggerTests
     [Test]
     public void Test_Warning_Log_Format()
     {
-        Logger.Log("Test Warning Message", LogLevel.WARNING);
+        MDS.Logger.Log("Test Warning Message", LogLevel.WARNING);
 
         Assert.IsTrue(logMessages.Count > 0, "Log should have been captured.");
         Assert.That(GetLastLog(), Does.Contain("[MDS]"), "Log should contain the mod name [MDS].");
@@ -60,7 +61,7 @@ public class LoggerTests
         // Disable Unity's automatic test failure on errors
         LogAssert.ignoreFailingMessages = true;
 
-        Logger.Log("Test Error Message", LogLevel.ERROR);
+        MDS.Logger.Log("Test Error Message", LogLevel.ERROR);
 
         Assert.IsTrue(logMessages.Count > 0, "Log should have been captured.");
 
@@ -87,7 +88,7 @@ public class LoggerTests
     [Test]
     public void Test_Debug_Log_Disabled_By_Default()
     {
-        Logger.Log("Test Debug Message", LogLevel.DEBUG);
+        MDS.Logger.Log("Test Debug Message", LogLevel.DEBUG);
 
         Assert.IsTrue(logMessages.Count == 0, "DEBUG logs should not appear when disabled.");
     }
@@ -95,37 +96,37 @@ public class LoggerTests
     [Test]
     public void Test_Debug_Log_Appears_When_Enabled()
     {
-        Logger.SetEnableDebugLogging(true);
-        Logger.Log("Test Debug Message", LogLevel.DEBUG);
+        MDS.Logger.SetEnableDebugLogging(true);
+        MDS.Logger.Log("Test Debug Message", LogLevel.DEBUG);
 
         Assert.IsTrue(logMessages.Count > 0, "Log should have been captured.");
         Assert.That(GetLastLog(), Does.Contain("[MDS]"), "Log should contain the mod name [MDS].");
         Assert.That(GetLastLog(), Does.Contain("[DEBUG]"), "Log should contain the log level [DEBUG].");
         Assert.That(GetLastLog(), Does.Contain("Test Debug Message"), "DEBUG log should appear when enabled.");
 
-        Logger.SetEnableDebugLogging(false); // Reset for other tests
+        MDS.Logger.SetEnableDebugLogging(false); // Reset for other tests
     }
 
     [Test]
     public void Test_Logging_Can_Be_Disabled()
     {
-        Logger.SetEnableLogging(false);
-        Logger.Log("This should not appear", LogLevel.INFO);
+        MDS.Logger.SetEnableLogging(false);
+        MDS.Logger.Log("This should not appear", LogLevel.INFO);
 
         Assert.IsTrue(logMessages.Count == 0, "No logs should appear when logging is disabled.");
 
-        Logger.SetEnableLogging(true); // Reset for other tests
+        MDS.Logger.SetEnableLogging(true); // Reset for other tests
     }
 
     [Test]
     public void Test_Logging_Can_Be_Enabled_Again()
     {
-        Logger.SetEnableLogging(false);
-        Logger.Log("This should not appear", LogLevel.INFO);
+        MDS.Logger.SetEnableLogging(false);
+        MDS.Logger.Log("This should not appear", LogLevel.INFO);
 
-        Logger.SetEnableLogging(true);
-        Logger.Log("Logging enabled again", LogLevel.INFO);
-        Logger.Log("This should appear", LogLevel.INFO);
+        MDS.Logger.SetEnableLogging(true);
+        MDS.Logger.Log("Logging enabled again", LogLevel.INFO);
+        MDS.Logger.Log("This should appear", LogLevel.INFO);
 
         Assert.IsTrue(logMessages.Count > 0, "Log should have been captured.");
         Assert.That(logMessages[^2], Does.Contain("Logging enabled again"), "Log should confirm logging was enabled again.");

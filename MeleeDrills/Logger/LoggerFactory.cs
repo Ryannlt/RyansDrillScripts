@@ -1,7 +1,10 @@
-public static class LoggerFactory
+namespace MDS
 {
-    public static ILogger CreateLogger()
+    public static class LoggerFactory
     {
-        return new ConsoleLogger();
+        public static ILogger CreateLogger()
+        {
+            return new ConsoleLogger();
+        }
     }
 }

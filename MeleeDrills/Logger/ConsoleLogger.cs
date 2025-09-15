@@ -1,28 +1,31 @@
 using UnityEngine;
 using System;
 
-public class ConsoleLogger : ILogger
+namespace MDS
 {
-    public void Log(string message, LogLevel level)
+    public class ConsoleLogger : ILogger
     {
-        string timestamp = DateTime.Now.ToString("HH:mm:ss");
-        string formattedMessage = $"[MDS] [{timestamp}] [{level}] {message}";
-
-        switch (level)
+        public void Log(string message, LogLevel level)
         {
-            case LogLevel.WARNING:
-                Debug.LogWarning(formattedMessage);
-                break;
-            case LogLevel.ERROR:
-                Debug.LogError(formattedMessage);
-                break;
-            case LogLevel.DEBUG:
-                if (Logger.EnableDebugLogging)
+            string timestamp = DateTime.Now.ToString("HH:mm:ss");
+            string formattedMessage = $"[MDS] [{timestamp}] [{level}] {message}";
+
+            switch (level)
+            {
+                case LogLevel.WARNING:
+                    Debug.LogWarning(formattedMessage);
+                    break;
+                case LogLevel.ERROR:
+                    Debug.LogError(formattedMessage);
+                    break;
+                case LogLevel.DEBUG:
+                    if (Logger.EnableDebugLogging)
+                        Debug.Log(formattedMessage);
+                    break;
+                default:
                     Debug.Log(formattedMessage);
-                break;
-            default:
-                Debug.Log(formattedMessage);
-                break;
+                    break;
+            }
         }
     }
 }

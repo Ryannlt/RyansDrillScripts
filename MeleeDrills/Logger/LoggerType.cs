@@ -1,4 +1,7 @@
-public enum LoggerType
+namespace MDS
 {
-    Console
+    public enum LoggerType
+    {
+        Console
+    }
 }
