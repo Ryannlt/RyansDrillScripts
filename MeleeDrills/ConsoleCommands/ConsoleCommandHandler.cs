@@ -26,6 +26,7 @@ namespace MDS.ConsoleCommands
             RegisterCommand(new OpenMeleeCommand());
             RegisterCommand(new XvXCommand());
             RegisterCommand(new GroupfightCommand());
+            RegisterCommand(new ShootingTrainingCommand());
 
             Logger.Log($"Registered {commandRegistry.Count} predefined commands.", LogLevel.INFO);
         }

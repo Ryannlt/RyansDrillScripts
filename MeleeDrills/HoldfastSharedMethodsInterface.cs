@@ -69,6 +69,11 @@ namespace MDS
         {
             // Only process system 'quiet' messages with our MDS marker
             // If it gets more complicated make a helper decode function
+
+            //temp to check if on text message records panel messages.
+            string tempMessage = $"'{playerId}' sent '{text}' in channel '{channel}'";
+            Logger.Log(tempMessage, LogLevel.DEBUG);
+
             if (!HoldfastSharedMethodsInterface.getIsServer() && channel == TextChatChannel.None && text.StartsWith("[MDS-CLIENT-LOG]"))
             {
                 string logText = text.Substring("[MDS-CLIENT-LOG]".Length).Trim();

@@ -20,6 +20,7 @@ namespace MDS.Events
             Register(EventEnum.TestEvent, new TestEvent());
             Register(EventEnum.OpenMelee, new OpenMeleeEvent());
             Register(EventEnum.XvX, new XvXEvent());
+            Register(EventEnum.ShootingTraining, new ShootingTrainingEvent());
 
             Logger.Log($"Registered {eventRegistry.Count} predefined events.", LogLevel.INFO);
         }
