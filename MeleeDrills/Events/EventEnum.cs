@@ -4,7 +4,8 @@ namespace MDS.Events
     {
         TestEvent,
         OpenMelee,
-        XvX
+        XvX,
+        ShootingTraining
         // Add more as needed
     }
 }
