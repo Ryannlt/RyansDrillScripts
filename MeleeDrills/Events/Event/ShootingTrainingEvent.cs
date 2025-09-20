@@ -15,7 +15,8 @@ namespace MDS.Events
         public void Trigger(object[] parameters)
         {
             Logger.Log($"Executing {EventName} as '{parameters[0]}'", LogLevel.DEBUG);
-            CommandExecutor.ExecuteCommand($"set characterInfiniteFirearmAmmo {parameters[0]}; set drawFirearmTrajectories {parameters[0]}");
+            CommandExecutor.ExecuteCommand($"set characterInfiniteFirearmAmmo {parameters[0]}");
+            CommandExecutor.ExecuteCommand($"set drawFirearmTrajectories {parameters[0]}");
         }
     }
 }
