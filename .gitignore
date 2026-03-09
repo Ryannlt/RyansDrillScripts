@@ -103,3 +103,4 @@ InitTestScene*.unity*
 
 # Manual
 *.meta
+Editor/
