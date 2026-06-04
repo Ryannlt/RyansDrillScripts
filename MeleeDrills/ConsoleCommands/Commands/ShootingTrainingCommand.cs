@@ -1,4 +1,3 @@
-using System.Linq;
 using MDS.Events;
 using MDS.Core;
 
@@ -13,24 +12,14 @@ namespace MDS.ConsoleCommands
         public bool Validate(string[] parameters, out string errorMessage)
         {
             errorMessage = string.Empty;
-            if (parameters.Length < 1) {
-                errorMessage = "Missing argument. Usage: rc shootingtraining <true/false>";
-                return false;
-            }
-
-            if (!bool.TryParse(parameters[0], out var result))
-            {
-                errorMessage = $"Invalid Input. '{parameters[0]}' must be 'true' or 'false'.";
-                return false;
-            }
-
-            _enabled = bool.Parse(parameters[0]);
-            return true;
+            return true; // Toggle command takes no arguments.
         }
 
         public void Execute(int playerId, string[] parameters)
         {
-            bool success = EventDispatcher.Trigger(EventEnum.ShootingTraining, parameters.Cast<object>().ToArray(), out string errorMessage);
+            bool newState = !_enabled;
+
+            bool success = EventDispatcher.Trigger(EventEnum.ShootingTraining, new object[] { newState }, out string errorMessage);
 
             if (!success)
             {
@@ -39,8 +28,10 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
+            // Only commit the new state once the game settings were applied successfully.
+            _enabled = newState;
             Logger.Log("ShootingTrainingCommand executed sucessfully", LogLevel.INFO);
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} ShootingTraining set to {_enabled}.");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Shooting training is now {(_enabled ? "ON" : "OFF")}.");
         }
     }
 }
