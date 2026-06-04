@@ -72,7 +72,6 @@ namespace MDS
 
         public void PassConfigVariables(string[] value)
         {
-            //Logger.Log($"Passing Config Variable: {string.Join(", ", value)}", LogLevel.INFO);
             ConfigManager.ProcessConfigVariables(value);
         }
 
