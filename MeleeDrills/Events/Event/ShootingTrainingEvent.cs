@@ -14,9 +14,12 @@ namespace MDS.Events
 
         public void Trigger(object[] parameters)
         {
-            Logger.Log($"Executing {EventName} as '{parameters[0]}'", LogLevel.DEBUG);
-            CommandExecutor.ExecuteCommand($"set characterInfiniteFirearmAmmo {parameters[0]}");
-            CommandExecutor.ExecuteCommand($"set drawFirearmTrajectories {parameters[0]}");
+            bool enabled = (bool)parameters[0];
+            string value = enabled ? "true" : "false";
+
+            Logger.Log($"Executing {EventName} as '{value}'", LogLevel.DEBUG);
+            CommandExecutor.ExecuteCommand($"set characterInfiniteFirearmAmmo {value}");
+            CommandExecutor.ExecuteCommand($"set drawFirearmTrajectories {value}");
         }
     }
 }
