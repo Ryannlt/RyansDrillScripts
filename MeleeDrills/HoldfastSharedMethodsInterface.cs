@@ -1,4 +1,4 @@
-﻿using HoldfastBridge;
+using HoldfastBridge;
 using HoldfastSharedMethods;
 using MDS.Client;
 using MDS.ConfigVariables;
