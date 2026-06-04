@@ -1,4 +1,4 @@
-﻿using HoldfastBridge;
+using HoldfastBridge;
 using HoldfastSharedMethods;
 using MDS.Client;
 using MDS.ConfigVariables;
@@ -11,7 +11,7 @@ namespace MDS
 {
     public class HoldfastSharedMethodsInterface : IHoldfastSharedMethods, IHoldfastSharedMethods2, IHoldfastSharedMethods3, IHoldfastGame
     {
-        private static bool _isServer;
+        private static bool isServer;
 
         public void OnGameMethodsInitialized(IHoldfastGameMethods holdfastGameMethods)
         {
@@ -21,12 +21,12 @@ namespace MDS
 
         public static bool getIsServer()
         {
-            return _isServer;
+            return isServer;
         }
 
         public void OnIsServer(bool server)
         {
-            _isServer = server;
+            isServer = server;
             StateTracker.OnIsServer(server); //We initialize the StateTracker server here due to unity static class weirdness.
             if (server)
             {
@@ -40,14 +40,18 @@ namespace MDS
 
         public void OnPlayerJoined(int playerId, ulong steamId, string playerName, string regimentTag, bool isBot)
         {
-            if (_isServer) StateTracker.OnPlayerJoined(playerId, steamId, playerName, regimentTag, isBot);
+            if (isServer) StateTracker.OnPlayerJoined(playerId, steamId, playerName, regimentTag, isBot);
         }
+
+        public void OnPlayerLeft(int playerId) { }
 
         public void OnPlayerSpawned(int playerId, int spawnSectionId, FactionCountry playerFaction, PlayerClass playerClass, int uniformId, GameObject playerObject)
         {
-            if (_isServer) StateTracker.OnPlayerSpawned(playerId, spawnSectionId, playerFaction, playerClass, uniformId, playerObject);
-            if (!_isServer) ClientAdminDetection.TrySpawnAdminCheck();
+            if (isServer) StateTracker.OnPlayerSpawned(playerId, spawnSectionId, playerFaction, playerClass, uniformId, playerObject);
+            if (!isServer) ClientAdminDetection.TrySpawnAdminCheck();
         }
+
+        public void OnScorableAction(int playerId, int score, ScorableActionType reason) { }
 
         public void OnTextMessage(int playerId, TextChatChannel channel, string text)
         {
@@ -63,18 +67,22 @@ namespace MDS
 
         public void OnRoundDetails(int roundId, string serverName, string mapName, FactionCountry attackingFaction, FactionCountry defendingFaction, GameplayMode gameplayMode, GameType gameType)
         {
-            if (_isServer) StateTracker.OnRoundDetails(roundId, serverName, mapName, attackingFaction, defendingFaction, gameplayMode, gameType);
+            if (isServer) StateTracker.OnRoundDetails(roundId, serverName, mapName, attackingFaction, defendingFaction, gameplayMode, gameType);
         }
 
         public void PassConfigVariables(string[] value)
         {
-            //Logger.Log($"Passing Config Variable: {string.Join(", ", value)}", LogLevel.INFO);
             ConfigManager.ProcessConfigVariables(value);
+        }
+
+        public void OnRCLogin(int playerId, string inputPassword, bool isLoggedIn)
+        {
+            if (isServer) StateTracker.OnRCLogin(playerId, inputPassword, isLoggedIn);
         }
 
         public void OnRCCommand(int playerId, string input, string output, bool success)
         {
-            if (_isServer)
+            if (isServer)
             {
                 ConsoleCommandHandler.ProcessConsoleCommand(playerId, input, output, success);
                 StateTracker.OnRCCommand(playerId, input, output, success);
@@ -101,71 +109,103 @@ namespace MDS
 
         public void OnStartSpectate(int playerId, int spectatedPlayerId)
         {
-            if (_isServer) StateTracker.OnPlayerEnterSpectatorMode(playerId);
-            if (!_isServer) ClientAdminDetection.TrySpawnAdminCheck();
-        }
-
-        public void OnRCLogin(int playerId, string inputPassword, bool isLoggedIn)
-        {
-            if (_isServer) StateTracker.OnRCLogin(playerId, inputPassword, isLoggedIn);
+            if (isServer) StateTracker.OnPlayerEnterSpectatorMode(playerId);
+            if (!isServer) ClientAdminDetection.TrySpawnAdminCheck();
         }
 
         public void OnStartFreeflight(int playerId)
         {
-            if (_isServer) StateTracker.OnPlayerEnterSpectatorMode(playerId); //Spectator mode logic is the same as freeflight mode
-            if (!_isServer) ClientAdminDetection.TrySpawnAdminCheck();
+            if (isServer) StateTracker.OnPlayerEnterSpectatorMode(playerId); //Spectator mode logic is the same as freeflight mode
+            if (!isServer) ClientAdminDetection.TrySpawnAdminCheck();
         }
 
         public void OnPlayerConnected(int playerId, bool isAutoAdmin, string backendId)
         {
-            if (_isServer) StateTracker.OnPlayerConnected(playerId, isAutoAdmin, backendId);
+            if (isServer) StateTracker.OnPlayerConnected(playerId, isAutoAdmin, backendId);
         }
 
         public void OnPlayerDisconnected(int playerId)
         {
-            if (_isServer) StateTracker.OnPlayerDisconnected(playerId);
+            if (isServer) StateTracker.OnPlayerDisconnected(playerId);
         }
 
         public void OnSyncValueState(int value) { }
+
         public void OnUpdateSyncedTime(double time) { }
+
         public void OnUpdateElapsedTime(float time) { }
+
         public void OnUpdateTimeRemaining(float time) { }
+
         public void OnIsClient(bool client, ulong steamId) { }
+
         public void OnDamageableObjectDamaged(GameObject damageableObject, int damageableObjectId, int shipId, int oldHp, int newHp) { }
+
         public void OnPlayerHurt(int playerId, byte oldHp, byte newHp, EntityHealthChangedReason reason) { }
+
         public void OnPlayerKilledPlayer(int killerPlayerId, int victimPlayerId, EntityHealthChangedReason reason, string additionalDetails) { }
+
         public void OnPlayerShoot(int playerId, bool dryShot) { }
-        public void OnPlayerLeft(int playerId) { }
-        public void OnScorableAction(int playerId, int score, ScorableActionType reason) { }
+
         public void OnPlayerBlock(int attackingPlayerId, int defendingPlayerId) { }
+
         public void OnPlayerMeleeStartSecondaryAttack(int playerId) { }
+
         public void OnPlayerWeaponSwitch(int playerId, string weapon) { }
+
         public void OnCapturePointCaptured(int capturePoint) { }
+
         public void OnCapturePointOwnerChanged(int capturePoint, FactionCountry factionCountry) { }
+
         public void OnCapturePointDataUpdated(int capturePoint, int defendingPlayerCount, int attackingPlayerCount) { }
+
         public void OnRoundEndFactionWinner(FactionCountry factionCountry, FactionRoundWinnerReason reason) { }
+
         public void OnRoundEndPlayerWinner(int playerId) { }
+
         public void OnPlayerStartCarry(int playerId, CarryableObjectType carryableObject) { }
+
         public void OnPlayerEndCarry(int playerId) { }
+
         public void OnPlayerShout(int playerId, CharacterVoicePhrase voicePhrase) { }
+
         public void OnInteractableObjectInteraction(int playerId, int interactableObjectId, GameObject interactableObject, InteractionActivationType interactionActivationType, int nextActivationStateTransitionIndex) { }
+
         public void OnEmplacementPlaced(int itemId, GameObject objectBuilt, EmplacementType emplacementType) { }
+
         public void OnEmplacementConstructed(int itemId) { }
+
         public void OnBuffStart(int playerId, BuffType buff) { }
+
         public void OnBuffStop(int playerId, BuffType buff) { }
+
         public void OnShotInfo(int playerId, int shotCount, Vector3[][] shotsPointsPositions, float[] trajectileDistances, float[] distanceFromFiringPositions, float[] horizontalDeviationAngles, float[] maxHorizontalDeviationAngles, float[] muzzleVelocities, float[] gravities, float[] damageHitBaseDamages, float[] damageRangeUnitValues, float[] damagePostTraitAndBuffValues, float[] totalDamages, Vector3[] hitPositions, Vector3[] hitDirections, int[] hitPlayerIds, int[] hitDamageableObjectIds, int[] hitShipIds, int[] hitVehicleIds) { }
+
         public void OnVehicleSpawned(int vehicleId, FactionCountry vehicleFaction, PlayerClass vehicleClass, GameObject vehicleObject, int ownerPlayerId) { }
+
         public void OnVehicleHurt(int vehicleId, byte oldHp, byte newHp, EntityHealthChangedReason reason) { }
+
         public void OnPlayerKilledVehicle(int killerPlayerId, int victimVehicleId, EntityHealthChangedReason reason, string details) { }
+
         public void OnShipSpawned(int shipId, GameObject shipObject, FactionCountry shipfaction, ShipType shipType, int shipNameId) { }
+
         public void OnShipDamaged(int shipId, int oldHp, int newHp) { }
+
         public void OnAdminPlayerAction(int playerId, int adminId, ServerAdminAction action, string reason) { }
+
         public void OnConsoleCommand(string input, string output, bool success){}
+
         public void OnVehiclePacket(int vehicleId, Vector2 inputAxis, bool shift, bool strafe, PlayerVehicleActions[] actionCollection) { }
+
         public void OnOfficerOrderStart(int officerPlayerId, HighCommandOrderType officerOrderType, Vector3 orderPosition, float orderRotationY, int voicePhraseRandomIndex) { }
+
         public void OnOfficerOrderStop(int officerPlayerId, HighCommandOrderType officerOrderType) { }
+
         public void OnStopSpectate(int playerId, int spectatedPlayerId) { }
+
         public void OnStopFreeflight(int playerId) { }
+
         public void OnMeleeArenaRoundEndFactionWinner(int roundId, bool attackers) { }
+
     }
 }
