@@ -12,8 +12,11 @@
 /[Uu]ser[Ss]ettings/
 *.log
 
-# Meta files can be ignored
-.meta
+# Meta files - not tracked for this code-only mod
+*.meta
+
+# Unit test folders - not shipped with the mod
+Editor/
 
 # By default unity supports Blender asset imports, *.blend1 blender files do not need to be commited to version control.
 *.blend1

@@ -1,7 +1,6 @@
 using HoldfastBridge;
 using System;
 using UnityEngine;
-using UnityEngine.UI;
 
 // The CommandExecutor is solely responsible for finding and executing strings to the F1 console.
 
@@ -9,7 +8,6 @@ namespace MDS.Core
 {
     public static class CommandExecutor
     {
-        private static InputField consoleInputField;
         private static IHoldfastGameMethods _gameMethods;
 
         public static void InitializeConsole(IHoldfastGameMethods holdfastGameMethods)
