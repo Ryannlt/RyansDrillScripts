@@ -13,6 +13,7 @@ namespace MDS.Systems
         GameObject PlayerObject { get; }
         FactionCountry? Faction { get; }
         PlayerClass? PlayerClass { get; }
+        int? UniformId { get; }
 
         void AssignSpawnDetails(int spawnSectionId, FactionCountry faction, PlayerClass playerClass, int uniformId, GameObject playerObject);
     }
