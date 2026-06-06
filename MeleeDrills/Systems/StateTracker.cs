@@ -84,6 +84,7 @@ namespace MDS.Systems
 
             XvXCommand.Reset();
             GroupfightCommand.Reset();
+            BotManager.Reset();
         }
 
         public static void OnPlayerConnected(int playerId, bool isAutoAdmin, string backendId)
@@ -101,6 +102,7 @@ namespace MDS.Systems
             if (isBot)
             {
                 newPlayer = new Bot(playerId, playerName, regimentTag);
+                BotManager.OnBotJoined(newPlayer);
             }
             else
             {
@@ -127,6 +129,11 @@ namespace MDS.Systems
             _defendingPlayers.Remove(player);
             _spectatorPlayers.Remove(player);
             _connectedPlayers.Remove(playerId);
+
+            if (player.IsBot)
+            {
+                BotManager.OnBotDisconnected(playerId);
+            }
         }
 
         public static void OnPlayerSpawned(int playerId, int spawnSectionId, FactionCountry faction, PlayerClass playerClass, int uniformId, GameObject playerObject)
@@ -166,6 +173,22 @@ namespace MDS.Systems
             }
 
             Logger.Log($"Player Spawned: {player}", LogLevel.DEBUG);
+
+            if (player.IsBot)
+            {
+                BotManager.OnBotSpawned(player);
+            }
+        }
+
+        public static void OnPlayerDied(int playerId)
+        {
+            var player = GetPlayerById(playerId);
+            if (player == null) return;
+
+            Logger.Log($"Player {playerId} died.", LogLevel.DEBUG);
+
+            if (player.IsBot)
+                BotManager.OnBotDied(player);
         }
 
         public static void OnPlayerEnterSpectatorMode(int playerId)

@@ -10,6 +10,9 @@ namespace MDS.Systems
         string RegimentTag { get; }
         bool IsBot { get; }
         bool IsAdmin { get; }
+        GameObject PlayerObject { get; }
+        FactionCountry? Faction { get; }
+        PlayerClass? PlayerClass { get; }
 
         void AssignSpawnDetails(int spawnSectionId, FactionCountry faction, PlayerClass playerClass, int uniformId, GameObject playerObject);
     }
