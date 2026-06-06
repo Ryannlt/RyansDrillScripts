@@ -1,5 +1,6 @@
 using System;
 using MDS.Core;
+using MDS.Events;
 using MDS.Systems;
 
 namespace MDS.ConsoleCommands
@@ -37,21 +38,18 @@ namespace MDS.ConsoleCommands
         public void Execute(int playerId, string[] args)
         {
             EnumParser.TryParseEnumStrict(args[1], out BotAiEnum ai);
+            int targetId = args[0].Equals("all", StringComparison.OrdinalIgnoreCase) ? -1 : int.Parse(args[0]);
 
-            string message;
-            if (args[0].Equals("all", StringComparison.OrdinalIgnoreCase))
+            bool success = EventDispatcher.Trigger(EventEnum.SetBotAi, new object[] { targetId, ai }, out string error);
+
+            if (!success)
             {
-                BotManager.SetAiAll(ai);
-                message = $"Set AI '{ai}' on all bots.";
-            }
-            else
-            {
-                int id = int.Parse(args[0]);
-                bool ok = BotManager.SetAi(id, ai);
-                message = ok ? $"Set AI '{ai}' on bot {id}." : $"No tracked bot with id {id}.";
+                Logger.Log($"SetBotAi failed: {error}", LogLevel.WARNING);
+                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");
+                return;
             }
 
-            Logger.Log(message, LogLevel.INFO);
+            string message = targetId == -1 ? $"Set AI '{ai}' on all bots." : $"Set AI '{ai}' on bot {targetId}.";
             CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {message}");
         }
 
