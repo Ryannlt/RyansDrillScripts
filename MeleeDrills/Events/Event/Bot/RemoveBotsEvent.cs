@@ -1,9 +1,11 @@
+using System;
 using MDS.Systems;
 
 namespace MDS.Events
 {
-    // Removes one or all tracked bots. Pass playerId = -1 to remove all.
-    // Parameters: (int playerId)
+    // Removes all tracked bots matching a target token. 'all' also cancels pending (not-yet-joined) spawns.
+    // Target: <playerId> | all | attacking | defending | <faction name>
+    // Parameters: (string target)
     public class RemoveBotsEvent : IEvent
     {
         public EventEnum EventName => EventEnum.RemoveBots;
@@ -12,9 +14,15 @@ namespace MDS.Events
         {
             errorMessage = string.Empty;
 
-            if (parameters.Length != 1 || parameters[0] is not int)
+            if (parameters.Length != 1 || parameters[0] is not string target)
             {
-                errorMessage = "Invalid parameters. Expected: (int playerId), or -1 to remove all.";
+                errorMessage = "Invalid parameters. Expected: (string target).";
+                return false;
+            }
+
+            if (!BotTargetSelector.IsValidToken(target))
+            {
+                errorMessage = $"Invalid target '{target}'. Use a playerId, all, attacking, defending, or a faction name.";
                 return false;
             }
 
@@ -23,20 +31,20 @@ namespace MDS.Events
 
         public void Trigger(object[] parameters)
         {
-            int playerId = (int)parameters[0];
+            string target = (string)parameters[0];
 
-            if (playerId == -1)
+            if (target.Equals("all", StringComparison.OrdinalIgnoreCase))
             {
-                BotManager.RemoveAll();
-                Logger.Log("RemoveBotsEvent triggered: removed all bots.", LogLevel.INFO);
+                BotManager.RemoveAll();   // kicks all + cancels pending spawns
+                Logger.Log("RemoveBotsEvent: removed all bots.", LogLevel.INFO);
+                return;
             }
-            else
-            {
-                bool removed = BotManager.RemoveBot(playerId);
-                Logger.Log(removed
-                    ? $"RemoveBotsEvent triggered: removed bot {playerId}."
-                    : $"RemoveBotsEvent: no tracked bot with id {playerId}.", LogLevel.INFO);
-            }
+
+            var ids = BotTargetSelector.Resolve(target);
+            foreach (int id in ids)
+                BotManager.RemoveBot(id);
+
+            Logger.Log($"RemoveBotsEvent: removed {ids.Count} bot(s) matching '{target}'.", LogLevel.INFO);
         }
     }
 }

@@ -54,12 +54,6 @@ namespace MDS.Systems
             return true;
         }
 
-        public static void SetAiAll(BotAiEnum ai)
-        {
-            foreach (var bot in _bots)
-                bot.SetAi(BotAiFactory.Create(ai));
-        }
-
         public static bool SetDeath(int playerId, BotDeathPolicy policy)
         {
             var bot = _bots.FirstOrDefault(b => b.PlayerId == playerId);
@@ -67,12 +61,6 @@ namespace MDS.Systems
 
             bot.SetDeathPolicy(policy);
             return true;
-        }
-
-        public static void SetDeathAll(BotDeathPolicy policy)
-        {
-            foreach (var bot in _bots)
-                bot.SetDeathPolicy(policy);
         }
 
         public static bool RemoveBot(int playerId)
@@ -127,7 +115,7 @@ namespace MDS.Systems
             // Capture state at the moment of death - position/GameObject may be gone moments later.
             BotDeathPolicy policy = controller.DeathPolicy;
             Vector3? deathPos = controller.Position;
-            BotSpawnSpec spec = controller.Spec;
+            BotSpawnSpec spec = BuildReplacementSpec(controller);
             BotAiEnum ai = controller.AiType;
 
             switch (policy)
@@ -145,18 +133,18 @@ namespace MDS.Systems
                     ScheduleDeathKick(bot.PlayerId, null, ai, policy, null);
                     break;
 
-                case BotDeathPolicy.ReturnToDeath:
+                case BotDeathPolicy.Replace:
                     controller.MarkAwaitingKick();
 
                     if (spec == null || !deathPos.HasValue)
                     {
                         string reason = spec == null ? "has no spawn spec (random bot)" : "position unavailable";
-                        Logger.Log($"Bot {bot.PlayerId} died (policy: ReturnToDeath) but {reason}. Kicking only (in {DeathKickDelaySeconds}s).", LogLevel.WARNING);
+                        Logger.Log($"Bot {bot.PlayerId} died (policy: Replace) but {reason}. Kicking only (in {DeathKickDelaySeconds}s).", LogLevel.WARNING);
                         ScheduleDeathKick(bot.PlayerId, null, ai, policy, null);
                         break;
                     }
 
-                    Logger.Log($"Bot {bot.PlayerId} died (policy: ReturnToDeath). Kicking in {DeathKickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
+                    Logger.Log($"Bot {bot.PlayerId} died (policy: Replace). Kicking in {DeathKickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
                     ScheduleDeathKick(bot.PlayerId, spec, ai, policy, deathPos.Value);
                     break;
             }
@@ -189,7 +177,7 @@ namespace MDS.Systems
 
         // A death-triggered kick is delayed so the game can credit the killer and play the death before
         // the bot is removed (an immediate kick makes the bot vanish without crediting the kill).
-        // A non-null replacementSpec (+ position) spawns a replacement once the kick fires (ReturnToDeath).
+        // A non-null replacementSpec (+ position) spawns a replacement once the kick fires (Replace).
         private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
         {
             if (!UnityEngine.Application.isPlaying)
@@ -215,6 +203,24 @@ namespace MDS.Systems
 
             if (replacementSpec != null && replacementPos.HasValue)
                 SpawnBots(1, replacementSpec, ai, death, replacementPos.Value);
+        }
+
+        // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills
+        // in the bot's ACTUAL name/regtag/uniformId. The game assigns those randomly when unspecified,
+        // so reusing the real values makes the replacement match the bot it replaces. Returns null for
+        // random-spawned bots (which have no spec to replay).
+        private static BotSpawnSpec BuildReplacementSpec(BotController controller)
+        {
+            var spec = controller.Spec;
+            if (spec == null) return null;
+
+            var bot = controller.Bot;
+            return new BotSpawnSpec(
+                spec.Faction,
+                spec.Class,
+                bot.PlayerName,
+                bot.RegimentTag,
+                bot.UniformId);
         }
 
         private static void EnsureTicking()

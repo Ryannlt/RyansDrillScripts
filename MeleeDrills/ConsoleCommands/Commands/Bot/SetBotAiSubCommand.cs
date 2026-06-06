@@ -5,7 +5,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot setBotAi <playerId|all> <aiType>
+    // rc bot setBotAi <playerId|all|attacking|defending|faction> <aiType>
     public class SetBotAiSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.SetBotAi;
@@ -16,13 +16,13 @@ namespace MDS.ConsoleCommands
 
             if (args.Length < 2)
             {
-                errorMessage = "Usage: rc bot setBotAi <playerId|all> <aiType>";
+                errorMessage = "Usage: rc bot setBotAi <playerId|all|attacking|defending|faction> <aiType>";
                 return false;
             }
 
-            if (!IsIdOrAll(args[0]))
+            if (!BotTargetSelector.IsValidToken(args[0]))
             {
-                errorMessage = $"Invalid target '{args[0]}'. Must be a playerId or 'all'.";
+                errorMessage = $"Invalid target '{args[0]}'. Use a playerId, all, attacking, defending, or a faction name.";
                 return false;
             }
 
@@ -37,10 +37,10 @@ namespace MDS.ConsoleCommands
 
         public void Execute(int playerId, string[] args)
         {
+            string target = args[0];
             EnumParser.TryParseEnumStrict(args[1], out BotAiEnum ai);
-            int targetId = args[0].Equals("all", StringComparison.OrdinalIgnoreCase) ? -1 : int.Parse(args[0]);
 
-            bool success = EventDispatcher.Trigger(EventEnum.SetBotAi, new object[] { targetId, ai }, out string error);
+            bool success = EventDispatcher.Trigger(EventEnum.SetBotAi, new object[] { target, ai }, out string error);
 
             if (!success)
             {
@@ -49,11 +49,7 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            string message = targetId == -1 ? $"Set AI '{ai}' on all bots." : $"Set AI '{ai}' on bot {targetId}.";
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {message}");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Set AI '{ai}' on bots matching '{target}'.");
         }
-
-        private static bool IsIdOrAll(string token) =>
-            token.Equals("all", StringComparison.OrdinalIgnoreCase) || int.TryParse(token, out _);
     }
 }

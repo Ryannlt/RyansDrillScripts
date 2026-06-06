@@ -5,6 +5,6 @@ namespace MDS.Systems
     {
         None,          // do nothing - the game auto-respawns it (faction/class will randomize)
         Kick,          // kick on death; the bot is gone
-        ReturnToDeath  // kick + respawn an identical bot (same spec) at the death location
+        Replace        // kick + respawn an identical bot (same spec) at the death location
     }
 }

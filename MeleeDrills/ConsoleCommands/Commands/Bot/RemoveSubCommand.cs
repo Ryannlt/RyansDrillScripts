@@ -1,10 +1,10 @@
-using System;
 using MDS.Core;
 using MDS.Events;
+using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot remove <playerId|all>
+    // rc bot remove <playerId|all|attacking|defending|faction>
     public class RemoveSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Remove;
@@ -13,9 +13,9 @@ namespace MDS.ConsoleCommands
         {
             errorMessage = string.Empty;
 
-            if (args.Length < 1 || !IsIdOrAll(args[0]))
+            if (args.Length < 1 || !BotTargetSelector.IsValidToken(args[0]))
             {
-                errorMessage = "Usage: rc bot remove <playerId|all>";
+                errorMessage = "Usage: rc bot remove <playerId|all|attacking|defending|faction>";
                 return false;
             }
 
@@ -24,24 +24,18 @@ namespace MDS.ConsoleCommands
 
         public void Execute(int playerId, string[] args)
         {
-            int targetId = args[0].Equals("all", StringComparison.OrdinalIgnoreCase)
-                ? -1
-                : int.Parse(args[0]);
+            string target = args[0];
 
-            bool success = EventDispatcher.Trigger(EventEnum.RemoveBots, new object[] { targetId }, out string errorMessage);
+            bool success = EventDispatcher.Trigger(EventEnum.RemoveBots, new object[] { target }, out string error);
 
             if (!success)
             {
-                Logger.Log($"RemoveBots failed: {errorMessage}", LogLevel.WARNING);
-                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {errorMessage}");
+                Logger.Log($"RemoveBots failed: {error}", LogLevel.WARNING);
+                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");
                 return;
             }
 
-            string message = targetId == -1 ? "Removed all bots." : $"Removed bot {targetId}.";
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {message}");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Removed bots matching '{target}'.");
         }
-
-        private static bool IsIdOrAll(string token) =>
-            token.Equals("all", StringComparison.OrdinalIgnoreCase) || int.TryParse(token, out _);
     }
 }
