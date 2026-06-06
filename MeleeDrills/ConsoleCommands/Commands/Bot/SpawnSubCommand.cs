@@ -1,0 +1,37 @@
+using MDS.Core;
+using MDS.Events;
+
+namespace MDS.ConsoleCommands
+{
+    // rc bot spawn [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
+    // Uses carbonPlayers spawnSpecific. faction/class default to the caller; ai/death to config defaults.
+    public class SpawnSubCommand : IBotSubCommand
+    {
+        public BotCommandEnum SubCommandName => BotCommandEnum.Spawn;
+
+        public bool Validate(string[] args, out string errorMessage) =>
+            BotSpawnArgs.ValidateShape(args, out errorMessage);
+
+        public void Execute(int playerId, string[] args)
+        {
+            if (!BotSpawnArgs.TryResolve(args, playerId, out var parsed, out string error))
+            {
+                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");
+                return;
+            }
+
+            bool success = EventDispatcher.Trigger(EventEnum.SpawnBots,
+                new object[] { parsed.Spec, parsed.Count, parsed.Ai, parsed.Death, null },
+                out string eventError);
+
+            if (!success)
+            {
+                Logger.Log($"SpawnBots failed: {eventError}", LogLevel.WARNING);
+                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {eventError}");
+                return;
+            }
+
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Spawning {parsed.Count} bot(s): {parsed.Spec.Faction}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
+        }
+    }
+}

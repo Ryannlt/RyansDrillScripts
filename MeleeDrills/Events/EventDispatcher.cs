@@ -21,6 +21,8 @@ namespace MDS.Events
             Register(EventEnum.OpenMelee, new OpenMeleeEvent());
             Register(EventEnum.XvX, new XvXEvent());
             Register(EventEnum.ShootingTraining, new ShootingTrainingEvent());
+            Register(EventEnum.SpawnBots, new SpawnBotsEvent());
+            Register(EventEnum.RemoveBots, new RemoveBotsEvent());
 
             Logger.Log($"Registered {eventRegistry.Count} predefined events.", LogLevel.INFO);
         }

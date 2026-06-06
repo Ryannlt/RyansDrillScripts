@@ -8,7 +8,8 @@ namespace MDS.ConsoleCommands
         OpenMelee,
         XvX,
         Groupfight,
-        ShootingTraining
+        ShootingTraining,
+        Bot
         // Add more command types here as needed
     }
 }
