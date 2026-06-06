@@ -13,7 +13,7 @@ namespace MDS.Systems
 
         static BotAiFactory()
         {
-            Register(BotAiEnum.Idle, () => new IdleAi());
+            Register(BotAiEnum.None, () => new NoneAi());
 
             Logger.Log($"Registered {_factories.Count} bot AI type(s).", LogLevel.INFO);
         }
@@ -34,7 +34,7 @@ namespace MDS.Systems
             }
 
             Logger.Log($"No AI registered for '{type}'. Falling back to Idle.", LogLevel.WARNING);
-            return new IdleAi();
+            return new NoneAi();
         }
     }
 }

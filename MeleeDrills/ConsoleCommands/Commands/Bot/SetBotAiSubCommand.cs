@@ -4,10 +4,10 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot ai <playerId|all> <aiType>
-    public class AiSubCommand : IBotSubCommand
+    // rc bot setBotAi <playerId|all> <aiType>
+    public class SetBotAiSubCommand : IBotSubCommand
     {
-        public BotCommandEnum SubCommandName => BotCommandEnum.Ai;
+        public BotCommandEnum SubCommandName => BotCommandEnum.SetBotAi;
 
         public bool Validate(string[] args, out string errorMessage)
         {
@@ -15,7 +15,7 @@ namespace MDS.ConsoleCommands
 
             if (args.Length < 2)
             {
-                errorMessage = "Usage: rc bot ai <playerId|all> <aiType>";
+                errorMessage = "Usage: rc bot setBotAi <playerId|all> <aiType>";
                 return false;
             }
 

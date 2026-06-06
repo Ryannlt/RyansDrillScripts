@@ -6,8 +6,8 @@ namespace MDS.ConsoleCommands
         Spawn,
         SpawnRandom,
         Summon,
-        Ai,
-        Death,
+        SetBotAi,
+        SetBotDeathPolicy,
         Remove,
         List
         // Add more bot subcommands here as needed

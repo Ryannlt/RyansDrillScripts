@@ -57,7 +57,7 @@ namespace MDS.ConsoleCommands
                 Count = p.Count,
                 Spec = new BotSpawnSpec(faction, playerClass, p.Name, p.RegTag, p.UniformId),
                 Ai = p.Ai ?? ((BotDefaultAiConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultAi)).DefaultAi,
-                Death = p.Death ?? ((BotDefaultDeathConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultDeath)).DefaultPolicy
+                Death = p.Death ?? ((BotDefaultDeathConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultDeathPolicy)).DefaultPolicy
             };
             return true;
         }
