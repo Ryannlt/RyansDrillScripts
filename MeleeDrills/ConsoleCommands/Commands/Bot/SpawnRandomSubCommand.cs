@@ -29,7 +29,7 @@ namespace MDS.ConsoleCommands
             if (args.Length >= 1) int.TryParse(args[0], out count);
 
             BotAiEnum ai = ((BotDefaultAiConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultAi)).DefaultAi;
-            BotDeathPolicy death = ((BotDefaultDeathConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultDeath)).DefaultPolicy;
+            BotDeathPolicy death = ((BotDefaultDeathConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultDeathPolicy)).DefaultPolicy;
 
             bool success = EventDispatcher.Trigger(EventEnum.SpawnBots,
                 new object[] { null, count, ai, death, null },

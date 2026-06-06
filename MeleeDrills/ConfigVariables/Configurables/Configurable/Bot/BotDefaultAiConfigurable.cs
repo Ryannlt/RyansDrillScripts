@@ -9,7 +9,7 @@ namespace MDS.ConfigVariables
     {
         public ConfigurableEnum ConfigurableName => ConfigurableEnum.BotDefaultAi;
 
-        public BotAiEnum DefaultAi { get; set; } = BotAiEnum.Idle;
+        public BotAiEnum DefaultAi { get; set; } = BotAiEnum.None;
 
         public bool ValidateSet(string[] args, out string errorMessage)
         {

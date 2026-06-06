@@ -4,10 +4,10 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot death <playerId|all> <policy>
-    public class DeathSubCommand : IBotSubCommand
+    // rc bot setBotDeathPolicy <playerId|all> <policy>
+    public class SetBotDeathPolicySubCommand : IBotSubCommand
     {
-        public BotCommandEnum SubCommandName => BotCommandEnum.Death;
+        public BotCommandEnum SubCommandName => BotCommandEnum.SetBotDeathPolicy;
 
         public bool Validate(string[] args, out string errorMessage)
         {
@@ -15,7 +15,7 @@ namespace MDS.ConsoleCommands
 
             if (args.Length < 2)
             {
-                errorMessage = $"Usage: rc bot death <playerId|all> <policy>. Policies: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}.";
+                errorMessage = $"Usage: rc bot setBotDeathPolicy <playerId|all> <policy>. Policies: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}.";
                 return false;
             }
 

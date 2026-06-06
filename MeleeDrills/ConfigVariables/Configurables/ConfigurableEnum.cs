@@ -19,6 +19,6 @@ namespace MDS.ConfigVariables
         GroupfightStrategy,
         Orientation,
         BotDefaultAi,
-        BotDefaultDeath
+        BotDefaultDeathPolicy
     }
 }

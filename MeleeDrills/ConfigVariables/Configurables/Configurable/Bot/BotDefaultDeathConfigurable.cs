@@ -8,7 +8,7 @@ namespace MDS.ConfigVariables
     // rc get/set botDefaultDeath.
     public class BotDefaultDeathConfigurable : IConfigurable
     {
-        public ConfigurableEnum ConfigurableName => ConfigurableEnum.BotDefaultDeath;
+        public ConfigurableEnum ConfigurableName => ConfigurableEnum.BotDefaultDeathPolicy;
 
         public BotDeathPolicy DefaultPolicy { get; set; } = BotDeathPolicy.None;
 
@@ -18,7 +18,7 @@ namespace MDS.ConfigVariables
 
             if (args.Length != 1 || !EnumParser.TryParseEnumStrict(args[0], out BotDeathPolicy _))
             {
-                errorMessage = $"Invalid policy. Valid: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}. Usage: rc set botDefaultDeath <policy>";
+                errorMessage = $"Invalid policy. Valid: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}. Usage: rc set botDefaultDeath <deathPolicyEnum>";
                 return false;
             }
 

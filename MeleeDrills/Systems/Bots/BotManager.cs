@@ -14,7 +14,8 @@ namespace MDS.Systems
     public static class BotManager
     {
         private const float TickInterval = 0.05f;                 // 20 Hz - tunable
-        private const BotAiEnum DefaultAi = BotAiEnum.Idle;
+        private const float DeathKickDelaySeconds = 2f;           // delay so the killer is credited before removal
+        private const BotAiEnum DefaultAi = BotAiEnum.None;
         private const BotDeathPolicy DefaultDeath = BotDeathPolicy.None;
 
         private static readonly List<BotController> _bots = new();
@@ -120,47 +121,38 @@ namespace MDS.Systems
             var controller = _bots.FirstOrDefault(b => b.PlayerId == bot.PlayerId);
             if (controller == null) return;
 
-            switch (controller.DeathPolicy)
+            // Capture state at the moment of death - position/GameObject may be gone moments later.
+            BotDeathPolicy policy = controller.DeathPolicy;
+            Vector3? deathPos = controller.Position;
+            BotSpawnSpec spec = controller.Spec;
+            BotAiEnum ai = controller.AiType;
+
+            switch (policy)
             {
                 case BotDeathPolicy.None:
+                    // Do nothing - the game auto-respawns it and the bot stays tracked.
                     Logger.Log($"Bot {bot.PlayerId} died (policy: None). No action taken.", LogLevel.DEBUG);
                     break;
 
                 case BotDeathPolicy.Kick:
-                    Logger.Log($"Bot {bot.PlayerId} died (policy: Kick). Kicking.", LogLevel.INFO);
+                    Logger.Log($"Bot {bot.PlayerId} died (policy: Kick). Kicking in {DeathKickDelaySeconds}s.", LogLevel.INFO);
                     Untrack(bot.PlayerId);
-                    CarbonPlayerCommands.Despawn(bot.PlayerId);
+                    ScheduleDeathKick(bot.PlayerId, null, ai, policy, null);
                     break;
 
                 case BotDeathPolicy.ReturnToDeath:
-                    // Capture everything we need before untracking.
-                    Vector3? deathPos = controller.Position;
-                    BotSpawnSpec spec = controller.Spec;
-                    BotAiEnum ai = controller.AiType;
-                    BotDeathPolicy death = controller.DeathPolicy;
-
-                    if (spec == null)
-                    {
-                        // Random-spawned bots have no spec to replay - kick only.
-                        Logger.Log($"Bot {bot.PlayerId} died (policy: ReturnToDeath) but has no spawn spec (random bot). Kicking only.", LogLevel.WARNING);
-                        Untrack(bot.PlayerId);
-                        CarbonPlayerCommands.Despawn(bot.PlayerId);
-                        break;
-                    }
-
-                    if (!deathPos.HasValue)
-                    {
-                        // Position unavailable (GameObject already gone) - kick only.
-                        Logger.Log($"Bot {bot.PlayerId} died (policy: ReturnToDeath) but position unavailable. Kicking only.", LogLevel.WARNING);
-                        Untrack(bot.PlayerId);
-                        CarbonPlayerCommands.Despawn(bot.PlayerId);
-                        break;
-                    }
-
-                    Logger.Log($"Bot {bot.PlayerId} died (policy: ReturnToDeath). Kicking and queuing replacement at {deathPos.Value}.", LogLevel.INFO);
                     Untrack(bot.PlayerId);
-                    CarbonPlayerCommands.Despawn(bot.PlayerId);
-                    SpawnBots(1, spec, ai, death, deathPos.Value);
+
+                    if (spec == null || !deathPos.HasValue)
+                    {
+                        string reason = spec == null ? "has no spawn spec (random bot)" : "position unavailable";
+                        Logger.Log($"Bot {bot.PlayerId} died (policy: ReturnToDeath) but {reason}. Kicking only (in {DeathKickDelaySeconds}s).", LogLevel.WARNING);
+                        ScheduleDeathKick(bot.PlayerId, null, ai, policy, null);
+                        break;
+                    }
+
+                    Logger.Log($"Bot {bot.PlayerId} died (policy: ReturnToDeath). Kicking in {DeathKickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
+                    ScheduleDeathKick(bot.PlayerId, spec, ai, policy, deathPos.Value);
                     break;
             }
         }
@@ -188,6 +180,34 @@ namespace MDS.Systems
 
             Logger.Log($"Bot {playerId} untracked. Active bots: {_bots.Count}.", LogLevel.INFO);
             if (_bots.Count == 0) StopTicking();
+        }
+
+        // A death-triggered kick is delayed so the game can credit the killer and play the death before
+        // the bot is removed (an immediate kick makes the bot vanish without crediting the kill).
+        // A non-null replacementSpec (+ position) spawns a replacement once the kick fires (ReturnToDeath).
+        private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
+        {
+            if (!UnityEngine.Application.isPlaying)
+            {
+                ExecuteDeathKick(playerId, replacementSpec, ai, death, replacementPos);
+                return;
+            }
+
+            MonoBehaviourRunner.Instance.StartCoroutine(DeathKickRoutine(playerId, replacementSpec, ai, death, replacementPos));
+        }
+
+        private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
+        {
+            yield return new WaitForSeconds(DeathKickDelaySeconds);
+            ExecuteDeathKick(playerId, replacementSpec, ai, death, replacementPos);
+        }
+
+        private static void ExecuteDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
+        {
+            CarbonPlayerCommands.Despawn(playerId);
+
+            if (replacementSpec != null && replacementPos.HasValue)
+                SpawnBots(1, replacementSpec, ai, death, replacementPos.Value);
         }
 
         private static void EnsureTicking()
