@@ -13,6 +13,7 @@ namespace MDS.Systems
         public BotSpawnSpec Spec { get; }                 // null for randomly-spawned bots
         public BotDeathPolicy DeathPolicy { get; private set; }
         public bool Initialized { get; private set; }
+        public bool IsAwaitingKick { get; private set; }   // a death-kick is scheduled; ignore further deaths
 
         private IBotAi _ai;
         private Vector3? _pendingTeleport;                // applied on first spawn (summon / return-to-death)
@@ -37,6 +38,8 @@ namespace MDS.Systems
             DeathPolicy = policy;
             Logger.Log($"Bot {PlayerId} death policy set to {policy}.", LogLevel.INFO);
         }
+
+        public void MarkAwaitingKick() => IsAwaitingKick = true;
 
         // Called when the bot spawns (GameObject available). Enables input control on the first spawn,
         // and applies a pending teleport (summon / return-to-death placement) if one is queued.

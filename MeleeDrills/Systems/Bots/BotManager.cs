@@ -121,6 +121,9 @@ namespace MDS.Systems
             var controller = _bots.FirstOrDefault(b => b.PlayerId == bot.PlayerId);
             if (controller == null) return;
 
+            // A kick is already scheduled (e.g. it was killed again during the delay) - ignore.
+            if (controller.IsAwaitingKick) return;
+
             // Capture state at the moment of death - position/GameObject may be gone moments later.
             BotDeathPolicy policy = controller.DeathPolicy;
             Vector3? deathPos = controller.Position;
@@ -135,13 +138,15 @@ namespace MDS.Systems
                     break;
 
                 case BotDeathPolicy.Kick:
+                    // Keep it tracked until the kick fires, so an auto-respawn during the delay re-joins
+                    // as an already-tracked bot (guarded in OnBotJoined) rather than resetting to defaults.
                     Logger.Log($"Bot {bot.PlayerId} died (policy: Kick). Kicking in {DeathKickDelaySeconds}s.", LogLevel.INFO);
-                    Untrack(bot.PlayerId);
+                    controller.MarkAwaitingKick();
                     ScheduleDeathKick(bot.PlayerId, null, ai, policy, null);
                     break;
 
                 case BotDeathPolicy.ReturnToDeath:
-                    Untrack(bot.PlayerId);
+                    controller.MarkAwaitingKick();
 
                     if (spec == null || !deathPos.HasValue)
                     {
@@ -204,6 +209,8 @@ namespace MDS.Systems
 
         private static void ExecuteDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
         {
+            // Untrack only now (not at death time) so the bot stays tracked through the delay.
+            Untrack(playerId);
             CarbonPlayerCommands.Despawn(playerId);
 
             if (replacementSpec != null && replacementPos.HasValue)
