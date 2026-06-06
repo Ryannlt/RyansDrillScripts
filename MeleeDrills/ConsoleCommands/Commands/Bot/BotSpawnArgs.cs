@@ -21,15 +21,16 @@ namespace MDS.ConsoleCommands
         public BotDeathPolicy Death { get; private set; }
 
         // Structural validation only (no caller resolution); used by Validate which has no playerId.
-        public static bool ValidateShape(string[] args, out string error) =>
-            ParseTokens(args, out _, out error);
+        // allowCount: spawn accepts a leading count; summon does not (it's always a single bot).
+        public static bool ValidateShape(string[] args, bool allowCount, out string error) =>
+            ParseTokens(args, allowCount, out _, out error);
 
         // Full resolution incl. caller defaults; used by Execute which has the caller's playerId.
-        public static bool TryResolve(string[] args, int callerPlayerId, out BotSpawnArgs result, out string error)
+        public static bool TryResolve(string[] args, int callerPlayerId, bool allowCount, out BotSpawnArgs result, out string error)
         {
             result = null;
 
-            if (!ParseTokens(args, out Parsed p, out error))
+            if (!ParseTokens(args, allowCount, out Parsed p, out error))
                 return false;
 
             FactionCountry faction;
@@ -62,15 +63,19 @@ namespace MDS.ConsoleCommands
             return true;
         }
 
-        private static bool ParseTokens(string[] args, out Parsed p, out string error)
+        private static bool ParseTokens(string[] args, bool allowCount, out Parsed p, out string error)
         {
             p = new Parsed { Count = 1 };
             error = string.Empty;
 
+            string order = allowCount
+                ? "[count] [faction class] [ai] [death] [name [regtag [uniformId]]]"
+                : "[faction class] [ai] [death] [name [regtag [uniformId]]]";
+
             int i = 0;
 
-            // optional leading count
-            if (i < args.Length && int.TryParse(args[i], out int count))
+            // optional leading count (spawn only)
+            if (allowCount && i < args.Length && int.TryParse(args[i], out int count))
             {
                 if (count <= 0) { error = "Count must be a positive integer."; return false; }
                 p.Count = count;
@@ -111,7 +116,7 @@ namespace MDS.ConsoleCommands
             {
                 if (!p.HasSpec)
                 {
-                    error = $"Unexpected argument '{args[i]}'. Order: [count] [faction class] [ai] [death] [name [regtag [uniformId]]].";
+                    error = $"Unexpected argument '{args[i]}'. Order: {order}.";
                     return false;
                 }
 
@@ -129,7 +134,7 @@ namespace MDS.ConsoleCommands
                 }
                 if (i < args.Length)
                 {
-                    error = "Too many arguments. Order: [count] [faction class] [ai] [death] [name [regtag [uniformId]]].";
+                    error = $"Too many arguments. Order: {order}.";
                     return false;
                 }
             }

@@ -23,6 +23,8 @@ namespace MDS.Events
             Register(EventEnum.ShootingTraining, new ShootingTrainingEvent());
             Register(EventEnum.SpawnBots, new SpawnBotsEvent());
             Register(EventEnum.RemoveBots, new RemoveBotsEvent());
+            Register(EventEnum.SetBotAi, new SetBotAiEvent());
+            Register(EventEnum.SetBotDeathPolicy, new SetBotDeathPolicyEvent());
 
             Logger.Log($"Registered {eventRegistry.Count} predefined events.", LogLevel.INFO);
         }

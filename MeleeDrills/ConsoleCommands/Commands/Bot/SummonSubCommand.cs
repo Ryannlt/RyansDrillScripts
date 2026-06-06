@@ -5,18 +5,18 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot summon [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // Same as spawn, then teleports the spawned bot(s) to the caller's location.
+    // rc bot summon [faction class] [ai] [death] [name [regtag [uniformId]]]
+    // Spawns a single bot (no count - multiple would stack on one spot) then teleports it to the caller.
     public class SummonSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Summon;
 
         public bool Validate(string[] args, out string errorMessage) =>
-            BotSpawnArgs.ValidateShape(args, out errorMessage);
+            BotSpawnArgs.ValidateShape(args, allowCount: false, out errorMessage);
 
         public void Execute(int playerId, string[] args)
         {
-            if (!BotSpawnArgs.TryResolve(args, playerId, out var parsed, out string error))
+            if (!BotSpawnArgs.TryResolve(args, playerId, allowCount: false, out var parsed, out string error))
             {
                 CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");
                 return;
@@ -41,7 +41,7 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning {parsed.Count} bot(s) to your location.");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning a bot to your location.");
         }
     }
 }

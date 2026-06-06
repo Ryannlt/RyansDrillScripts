@@ -10,11 +10,11 @@ namespace MDS.ConsoleCommands
         public BotCommandEnum SubCommandName => BotCommandEnum.Spawn;
 
         public bool Validate(string[] args, out string errorMessage) =>
-            BotSpawnArgs.ValidateShape(args, out errorMessage);
+            BotSpawnArgs.ValidateShape(args, allowCount: true, out errorMessage);
 
         public void Execute(int playerId, string[] args)
         {
-            if (!BotSpawnArgs.TryResolve(args, playerId, out var parsed, out string error))
+            if (!BotSpawnArgs.TryResolve(args, playerId, allowCount: true, out var parsed, out string error))
             {
                 CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");
                 return;

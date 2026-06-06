@@ -7,7 +7,9 @@ namespace MDS.Events
         XvX,
         ShootingTraining,
         SpawnBots,
-        RemoveBots
+        RemoveBots,
+        SetBotAi,
+        SetBotDeathPolicy
         // Add more as needed
     }
 }
