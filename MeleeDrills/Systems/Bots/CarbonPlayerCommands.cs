@@ -14,6 +14,10 @@ namespace MDS.Systems
     {
         private const string Prefix = "carbonPlayers";
 
+        // Placeholder for an empty name/regtag slot, so a following positional arg (e.g. uniformId) can
+        // still be passed. The value only needs to be some non-empty string; it just occupies the slot.
+        private const string EmptyArgPlaceholder = "none";
+
         // Spawn <count> bots with random class/faction across spawn points.
         public static void Spawn(int count)
         {
@@ -26,16 +30,17 @@ namespace MDS.Systems
         {
             string cmd = $"{Prefix} spawnSpecific {spec.Faction} {spec.Class}";
 
-            if (!string.IsNullOrEmpty(spec.Name))
-            {
-                cmd += $" {spec.Name}";
-                if (!string.IsNullOrEmpty(spec.RegTag))
-                {
-                    cmd += $" {spec.RegTag}";
-                    if (spec.UniformId.HasValue)
-                        cmd += $" {spec.UniformId.Value}";
-                }
-            }
+            // Positional optional args: name, regtag, uniformId. To reach a later arg the earlier slots
+            // must be filled, so substitute a placeholder for an empty name/regtag when a following arg
+            // is set - otherwise an inherited uniformId is silently dropped for a bot with no regtag.
+            if (!string.IsNullOrEmpty(spec.Name) || !string.IsNullOrEmpty(spec.RegTag) || spec.UniformId.HasValue)
+                cmd += $" {Arg(spec.Name)}";
+
+            if (!string.IsNullOrEmpty(spec.RegTag) || spec.UniformId.HasValue)
+                cmd += $" {Arg(spec.RegTag)}";
+
+            if (spec.UniformId.HasValue)
+                cmd += $" {spec.UniformId.Value}";
 
             CommandExecutor.ExecuteCommand(cmd);
         }
@@ -100,6 +105,9 @@ namespace MDS.Systems
         {
             CommandExecutor.ExecuteCommand($"teleport {playerId} {Fmt(position.x)},{Fmt(position.y)},{Fmt(position.z)}");
         }
+
+        // A positional name/regtag arg, or the placeholder when empty.
+        private static string Arg(string value) => string.IsNullOrEmpty(value) ? EmptyArgPlaceholder : value;
 
         // Invariant culture so floats never serialize with a locale comma decimal separator.
         private static string Fmt(float value) => value.ToString(CultureInfo.InvariantCulture);
