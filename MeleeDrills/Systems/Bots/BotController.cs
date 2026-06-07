@@ -17,6 +17,7 @@ namespace MDS.Systems
 
         private IBotAi _ai;
         private BotPlacement? _pendingPlacement;          // position + optional facing, applied on first spawn
+        private readonly float _trackedAt = Time.realtimeSinceStartup;
 
         public BotController(IPlayer bot, IBotAi ai, BotSpawnSpec spec, BotDeathPolicy deathPolicy, BotPlacement? placement)
         {
@@ -77,6 +78,11 @@ namespace MDS.Systems
 
         // Live facing (degrees from North) via the spawn GameObject, or null if not currently spawned.
         public float? Heading => Bot.PlayerObject != null ? Bot.PlayerObject.transform.eulerAngles.y : (float?)null;
+
+        // A bot the game accepted (joined) but never actually spawned never becomes Initialized. After a
+        // timeout such a bot is a "ghost" - tracked by us but not present in the world - and is dropped.
+        public bool IsUnspawnedGhost(float now, float timeoutSeconds) =>
+            !Initialized && (now - _trackedAt) > timeoutSeconds;
 
         private void ApplyIntent(BotIntent intent)
         {
