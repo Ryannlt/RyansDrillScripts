@@ -25,6 +25,7 @@ namespace MDS.Events
             Register(EventEnum.RemoveBots, new RemoveBotsEvent());
             Register(EventEnum.SetBotAi, new SetBotAiEvent());
             Register(EventEnum.SetBotDeathPolicy, new SetBotDeathPolicyEvent());
+            Register(EventEnum.RotateBots, new RotateBotsEvent());
 
             Logger.Log($"Registered {eventRegistry.Count} predefined events.", LogLevel.INFO);
         }

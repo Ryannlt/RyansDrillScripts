@@ -28,10 +28,11 @@ namespace MDS.ConsoleCommands
                 CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Cannot summon - your position is unavailable (are you spawned?).");
                 return;
             }
-            Vector3 position = caller.PlayerObject.transform.position;
+            Transform callerTransform = caller.PlayerObject.transform;
+            var placement = new BotPlacement(callerTransform.position, callerTransform.eulerAngles.y);
 
             bool success = EventDispatcher.Trigger(EventEnum.SpawnBots,
-                new object[] { parsed.Spec, parsed.Count, parsed.Ai, parsed.Death, position },
+                new object[] { parsed.Spec, parsed.Count, parsed.Ai, parsed.Death, placement },
                 out string eventError);
 
             if (!success)
@@ -41,7 +42,7 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning a bot to your location.");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning bot: {parsed.Spec.Faction}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
         }
     }
 }

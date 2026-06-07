@@ -26,11 +26,11 @@ namespace MDS.Systems
 
         // ---- Command surface ----
 
-        // spec == null => fully random spawn (carbonPlayers spawn). spawnAt teleports each bot on spawn.
-        public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, Vector3? spawnAt)
+        // spec == null => fully random spawn (carbonPlayers spawn). placement positions/faces each bot on spawn.
+        public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
         {
             for (int i = 0; i < count; i++)
-                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, SpawnAt = spawnAt });
+                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement });
 
             if (spec == null)
             {
@@ -90,9 +90,9 @@ namespace MDS.Systems
 
             PendingBotSpawn p = _pending.Count > 0
                 ? _pending.Dequeue()
-                : new PendingBotSpawn { Spec = null, Ai = DefaultAi, Death = DefaultDeath, SpawnAt = null };
+                : new PendingBotSpawn { Spec = null, Ai = DefaultAi, Death = DefaultDeath, Placement = null };
 
-            _bots.Add(new BotController(bot, BotAiFactory.Create(p.Ai), p.Spec, p.Death, p.SpawnAt));
+            _bots.Add(new BotController(bot, BotAiFactory.Create(p.Ai), p.Spec, p.Death, p.Placement));
             Logger.Log($"Bot {bot.PlayerId} tracked (AI {p.Ai}, death {p.Death}). Active bots: {_bots.Count}.", LogLevel.INFO);
 
             EnsureTicking();
@@ -115,6 +115,7 @@ namespace MDS.Systems
             // Capture state at the moment of death - position/GameObject may be gone moments later.
             BotDeathPolicy policy = controller.DeathPolicy;
             Vector3? deathPos = controller.Position;
+            float? deathHeading = controller.Heading;
             BotSpawnSpec spec = BuildReplacementSpec(controller);
             BotAiEnum ai = controller.AiType;
 
@@ -145,7 +146,7 @@ namespace MDS.Systems
                     }
 
                     Logger.Log($"Bot {bot.PlayerId} died (policy: Replace). Kicking in {DeathKickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
-                    ScheduleDeathKick(bot.PlayerId, spec, ai, policy, deathPos.Value);
+                    ScheduleDeathKick(bot.PlayerId, spec, ai, policy, new BotPlacement(deathPos.Value, deathHeading));
                     break;
             }
         }
@@ -178,31 +179,31 @@ namespace MDS.Systems
         // A death-triggered kick is delayed so the game can credit the killer and play the death before
         // the bot is removed (an immediate kick makes the bot vanish without crediting the kill).
         // A non-null replacementSpec (+ position) spawns a replacement once the kick fires (Replace).
-        private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
+        private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
         {
             if (!UnityEngine.Application.isPlaying)
             {
-                ExecuteDeathKick(playerId, replacementSpec, ai, death, replacementPos);
+                ExecuteDeathKick(playerId, replacementSpec, ai, death, placement);
                 return;
             }
 
-            MonoBehaviourRunner.Instance.StartCoroutine(DeathKickRoutine(playerId, replacementSpec, ai, death, replacementPos));
+            MonoBehaviourRunner.Instance.StartCoroutine(DeathKickRoutine(playerId, replacementSpec, ai, death, placement));
         }
 
-        private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
+        private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
         {
             yield return new WaitForSeconds(DeathKickDelaySeconds);
-            ExecuteDeathKick(playerId, replacementSpec, ai, death, replacementPos);
+            ExecuteDeathKick(playerId, replacementSpec, ai, death, placement);
         }
 
-        private static void ExecuteDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, Vector3? replacementPos)
+        private static void ExecuteDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
         {
             // Untrack only now (not at death time) so the bot stays tracked through the delay.
             Untrack(playerId);
             CarbonPlayerCommands.Despawn(playerId);
 
-            if (replacementSpec != null && replacementPos.HasValue)
-                SpawnBots(1, replacementSpec, ai, death, replacementPos.Value);
+            if (replacementSpec != null && placement.HasValue)
+                SpawnBots(1, replacementSpec, ai, death, placement);
         }
 
         // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills
@@ -257,7 +258,7 @@ namespace MDS.Systems
             public BotSpawnSpec Spec;
             public BotAiEnum Ai;
             public BotDeathPolicy Death;
-            public Vector3? SpawnAt;
+            public BotPlacement? Placement;
         }
     }
 }

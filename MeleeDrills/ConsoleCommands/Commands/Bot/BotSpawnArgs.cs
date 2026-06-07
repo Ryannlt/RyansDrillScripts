@@ -1,3 +1,4 @@
+using System;
 using HoldfastSharedMethods;
 using MDS.ConfigVariables;
 using MDS.Core;
@@ -10,9 +11,13 @@ namespace MDS.ConsoleCommands
     // - faction/class: provide both or neither; omitted => default to the caller's faction/class.
     // - ai/death: omitted => config defaults (botDefaultAi / botDefaultDeath); provide inline to override.
     // - name/regtag/uniformId: require an explicit faction+class.
-    // Tokens are type-directed (faction/ai/death are recognised by parsing them), so e.g.
-    // 'spawn 3 Idle' sets the AI while keeping the caller's faction/class. The admin is expected to
-    // know the ordering; a wrong token produces a clear error message.
+    // Strict positional order:
+    //   [count] [faction [class]] [ai] [death] [name [regtag [uniformId]]]
+    // - Neither faction nor class   -> both default to caller's.
+    // - Faction only (no class)     -> faction explicit, class defaults to caller's.
+    // - Both faction and class      -> both explicit.
+    // The ai and death slots, if present, MUST parse as a valid AI / death policy - a wrong token
+    // errors rather than being silently taken as a name.
     public class BotSpawnArgs
     {
         public int Count { get; private set; } = 1;
@@ -36,17 +41,31 @@ namespace MDS.ConsoleCommands
             FactionCountry faction;
             PlayerClass playerClass;
 
+            var caller = StateTracker.GetPlayerById(callerPlayerId);
+
             if (p.HasSpec)
             {
+                // Both explicit.
                 faction = p.Faction;
                 playerClass = p.Class;
             }
+            else if (p.HasFaction)
+            {
+                // Faction explicit, class from caller.
+                faction = p.Faction;
+                if (caller?.PlayerClass == null)
+                {
+                    error = "You have no class to copy. Specify one explicitly: rc bot spawn [count] <faction> <class>";
+                    return false;
+                }
+                playerClass = caller.PlayerClass.Value;
+            }
             else
             {
-                var caller = StateTracker.GetPlayerById(callerPlayerId);
+                // Both from caller.
                 if (caller?.Faction == null || caller.PlayerClass == null)
                 {
-                    error = "You have no faction/class to copy. Specify them explicitly: rc bot spawn [count] <faction> <class>";
+                    error = "You have no faction/class to copy. Specify them explicitly: rc bot spawn [count] <faction> [class]";
                     return false;
                 }
                 faction = caller.Faction.Value;
@@ -82,39 +101,50 @@ namespace MDS.ConsoleCommands
                 i++;
             }
 
-            // optional faction + class (all or none)
+            // optional faction (and optional class)
             if (i < args.Length && EnumParser.TryParseEnumStrict(args[i], out FactionCountry faction))
             {
-                i++;
-                if (i >= args.Length || !EnumParser.TryParseEnumStrict(args[i], out PlayerClass playerClass))
-                {
-                    error = $"Faction '{faction}' must be followed by a class.";
-                    return false;
-                }
                 p.Faction = faction;
-                p.Class = playerClass;
-                p.HasSpec = true;
+                p.HasFaction = true;
                 i++;
+
+                // class is optional after faction - if the next token parses as one, consume it
+                if (i < args.Length && EnumParser.TryParseEnumStrict(args[i], out PlayerClass playerClass))
+                {
+                    p.Class = playerClass;
+                    p.HasSpec = true;
+                    i++;
+                }
             }
 
-            // optional ai
-            if (i < args.Length && EnumParser.TryParseEnumStrict(args[i], out BotAiEnum ai))
+            // ai slot - if a token is present here it MUST be a valid AI (no silent fallthrough to name).
+            if (i < args.Length)
             {
+                if (!EnumParser.TryParseEnumStrict(args[i], out BotAiEnum ai))
+                {
+                    error = $"Unknown AI '{args[i]}'. Valid: {string.Join(", ", Enum.GetNames(typeof(BotAiEnum)))}. Order: {order}.";
+                    return false;
+                }
                 p.Ai = ai;
                 i++;
             }
 
-            // optional death
-            if (i < args.Length && EnumParser.TryParseEnumStrict(args[i], out BotDeathPolicy death))
+            // death slot - if a token is present here it MUST be a valid death policy.
+            if (i < args.Length)
             {
+                if (!EnumParser.TryParseEnumStrict(args[i], out BotDeathPolicy death))
+                {
+                    error = $"Unknown death policy '{args[i]}'. Valid: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}. Order: {order}.";
+                    return false;
+                }
                 p.Death = death;
                 i++;
             }
 
-            // optional name / regtag / uniformId (require an explicit faction+class)
+            // optional name / regtag / uniformId (require at least an explicit faction)
             if (i < args.Length)
             {
-                if (!p.HasSpec)
+                if (!p.HasFaction)
                 {
                     error = $"Unexpected argument '{args[i]}'. Order: {order}.";
                     return false;
@@ -147,7 +177,8 @@ namespace MDS.ConsoleCommands
             public int Count;
             public FactionCountry Faction;
             public PlayerClass Class;
-            public bool HasSpec;
+            public bool HasFaction;  // faction was explicitly provided
+            public bool HasSpec;     // both faction AND class were explicitly provided
             public BotAiEnum? Ai;
             public BotDeathPolicy? Death;
             public string Name;
