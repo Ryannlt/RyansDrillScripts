@@ -15,6 +15,8 @@ namespace MDS.Systems
     {
         private const float TickInterval = 0.05f;                 // 20 Hz - tunable
         private const float DeathKickDelaySeconds = 2f;           // delay so the killer is credited before removal
+        private const float KickToSpawnDelaySeconds = 0.5f;       // gap after kick before respawning the replacement
+        private const float GhostTimeoutSeconds = 5f;             // drop bots that joined but never spawned
         private const BotAiEnum DefaultAi = BotAiEnum.None;
         private const BotDeathPolicy DefaultDeath = BotDeathPolicy.None;
 
@@ -183,7 +185,9 @@ namespace MDS.Systems
         {
             if (!UnityEngine.Application.isPlaying)
             {
-                ExecuteDeathKick(playerId, replacementSpec, ai, death, placement);
+                // Edit-mode (tests): no coroutine host / no real game - do it synchronously, no delays.
+                KickBot(playerId);
+                SpawnReplacement(replacementSpec, ai, death, placement);
                 return;
             }
 
@@ -192,16 +196,26 @@ namespace MDS.Systems
 
         private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
         {
+            // 1) Wait so the killer is credited and the death plays out before the bot is removed.
             yield return new WaitForSeconds(DeathKickDelaySeconds);
-            ExecuteDeathKick(playerId, replacementSpec, ai, death, placement);
+            KickBot(playerId);
+
+            // 2) Spawn the replacement only AFTER a short gap, so the kick fully frees the bot slot
+            //    first (kicking and respawning back-to-back can make the spawnSpecific fail).
+            yield return new WaitForSeconds(KickToSpawnDelaySeconds);
+            SpawnReplacement(replacementSpec, ai, death, placement);
         }
 
-        private static void ExecuteDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        private static void KickBot(int playerId)
         {
             // Untrack only now (not at death time) so the bot stays tracked through the delay.
             Untrack(playerId);
             CarbonPlayerCommands.Despawn(playerId);
+            Logger.Log($"Bot {playerId} kicked; replacement (if any) in {KickToSpawnDelaySeconds}s.", LogLevel.DEBUG);
+        }
 
+        private static void SpawnReplacement(BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        {
             if (replacementSpec != null && placement.HasValue)
                 SpawnBots(1, replacementSpec, ai, death, placement);
         }
@@ -244,8 +258,21 @@ namespace MDS.Systems
         {
             while (_bots.Count > 0)
             {
+                float now = Time.realtimeSinceStartup;
+
                 foreach (var bot in _bots.ToList())
+                {
+                    // Self-heal: a replacement that joined but never spawned (game rejected it, e.g. a
+                    // carbon-bot limit) would otherwise stay tracked forever as a ghost.
+                    if (bot.IsUnspawnedGhost(now, GhostTimeoutSeconds))
+                    {
+                        Logger.Log($"Bot {bot.PlayerId} joined but never spawned within {GhostTimeoutSeconds}s - dropping as ghost.", LogLevel.WARNING);
+                        Untrack(bot.PlayerId);
+                        continue;
+                    }
+
                     bot.Tick(TickInterval);
+                }
 
                 yield return new WaitForSeconds(TickInterval);
             }

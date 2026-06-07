@@ -30,12 +30,17 @@ namespace MDS.Core
                 return;
             }
 
-            _gameMethods.ExecuteConsoleCommand(command, out var output, out Exception exception);
+            bool success = _gameMethods.ExecuteConsoleCommand(command, out var output, out Exception exception);
 
             if (exception != null)
             {
                 Logger.Log($"Failed to execute command '{command}': {exception}", LogLevel.ERROR);
+                return;
             }
+
+            // DEBUG-only so it's silent in normal play; shows whether each command (e.g. spawnSpecific)
+            // succeeded, what the game returned, and - via the log timestamp - when.
+            Logger.Log($"Executed '{command}' -> success={success}, output='{output}'", LogLevel.DEBUG);
         }
 
         public static void SendClientLog(int playerId, string message)
