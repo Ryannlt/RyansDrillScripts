@@ -9,7 +9,8 @@ namespace MDS.Events
         SpawnBots,
         RemoveBots,
         SetBotAi,
-        SetBotDeathPolicy
+        SetBotDeathPolicy,
+        RotateBots
         // Add more as needed
     }
 }

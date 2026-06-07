@@ -16,15 +16,15 @@ namespace MDS.Systems
         public bool IsAwaitingKick { get; private set; }   // a death-kick is scheduled; ignore further deaths
 
         private IBotAi _ai;
-        private Vector3? _pendingTeleport;                // applied on first spawn (summon / return-to-death)
+        private BotPlacement? _pendingPlacement;          // position + optional facing, applied on first spawn
 
-        public BotController(IPlayer bot, IBotAi ai, BotSpawnSpec spec, BotDeathPolicy deathPolicy, Vector3? spawnAt)
+        public BotController(IPlayer bot, IBotAi ai, BotSpawnSpec spec, BotDeathPolicy deathPolicy, BotPlacement? placement)
         {
             Bot = bot;
             _ai = ai;
             Spec = spec;
             DeathPolicy = deathPolicy;
-            _pendingTeleport = spawnAt;
+            _pendingPlacement = placement;
         }
 
         public void SetAi(IBotAi ai)
@@ -42,7 +42,7 @@ namespace MDS.Systems
         public void MarkAwaitingKick() => IsAwaitingKick = true;
 
         // Called when the bot spawns (GameObject available). Enables input control on the first spawn,
-        // and applies a pending teleport (summon / return-to-death placement) if one is queued.
+        // and applies a pending placement (summon / replace): teleport + optional facing.
         public void OnSpawned()
         {
             if (!Initialized)
@@ -52,11 +52,15 @@ namespace MDS.Systems
                 Logger.Log($"Bot {PlayerId} initialized for input control.", LogLevel.DEBUG);
             }
 
-            if (_pendingTeleport.HasValue)
+            if (_pendingPlacement.HasValue)
             {
-                CarbonPlayerCommands.Teleport(PlayerId, _pendingTeleport.Value);
-                Logger.Log($"Bot {PlayerId} teleported to {_pendingTeleport.Value}.", LogLevel.DEBUG);
-                _pendingTeleport = null;
+                BotPlacement placement = _pendingPlacement.Value;
+                CarbonPlayerCommands.Teleport(PlayerId, placement.Position);
+                if (placement.Heading.HasValue)
+                    CarbonPlayerCommands.SetInputRotation(PlayerId, placement.Heading.Value);
+
+                Logger.Log($"Bot {PlayerId} placed at {placement.Position}{(placement.Heading.HasValue ? $" facing {placement.Heading.Value:F0} deg" : "")}.", LogLevel.DEBUG);
+                _pendingPlacement = null;
             }
         }
 
@@ -70,6 +74,9 @@ namespace MDS.Systems
 
         // Live world position via the spawn GameObject, or null if not currently spawned.
         public Vector3? Position => Bot.PlayerObject != null ? Bot.PlayerObject.transform.position : (Vector3?)null;
+
+        // Live facing (degrees from North) via the spawn GameObject, or null if not currently spawned.
+        public float? Heading => Bot.PlayerObject != null ? Bot.PlayerObject.transform.eulerAngles.y : (float?)null;
 
         private void ApplyIntent(BotIntent intent)
         {
