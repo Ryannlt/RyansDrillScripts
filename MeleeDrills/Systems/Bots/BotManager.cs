@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using MDS.ConfigVariables;
 using MDS.Core;
 
 // Central bot subsystem: spawns/tracks bots, assigns AI + death policy, and runs a single tick
@@ -14,11 +15,17 @@ namespace MDS.Systems
     public static class BotManager
     {
         private const float TickInterval = 0.05f;                 // 20 Hz - tunable
-        private const float DeathKickDelaySeconds = 2f;           // delay so the killer is credited before removal
-        private const float KickToSpawnDelaySeconds = 0.5f;       // gap after kick before respawning the replacement
         private const float GhostTimeoutSeconds = 5f;             // drop bots that joined but never spawned
-        private const BotAiEnum DefaultAi = BotAiEnum.None;
-        private const BotDeathPolicy DefaultDeath = BotDeathPolicy.None;
+
+        // Defaults + timings read live from configurables (settable via rc set / map config variables).
+        private static BotAiEnum DefaultAi =>
+            ((BotDefaultAiConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultAi)).DefaultAi;
+        private static BotDeathPolicy DefaultDeathPolicy =>
+            ((BotDefaultDeathConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultDeathPolicy)).DefaultPolicy;
+        private static float KickDelaySeconds =>
+            ((BotKickDelayConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotKickDelay)).KickDelay;
+        private static float ReplaceDelaySeconds =>
+            ((BotReplaceDelayConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotReplaceDelay)).ReplaceDelay;
 
         private static readonly List<BotController> _bots = new();
         private static readonly Queue<PendingBotSpawn> _pending = new();
@@ -92,7 +99,7 @@ namespace MDS.Systems
 
             PendingBotSpawn p = _pending.Count > 0
                 ? _pending.Dequeue()
-                : new PendingBotSpawn { Spec = null, Ai = DefaultAi, Death = DefaultDeath, Placement = null };
+                : new PendingBotSpawn { Spec = null, Ai = DefaultAi, Death = DefaultDeathPolicy, Placement = null };
 
             _bots.Add(new BotController(bot, BotAiFactory.Create(p.Ai), p.Spec, p.Death, p.Placement));
             Logger.Log($"Bot {bot.PlayerId} tracked (AI {p.Ai}, death {p.Death}). Active bots: {_bots.Count}.", LogLevel.INFO);
@@ -131,7 +138,7 @@ namespace MDS.Systems
                 case BotDeathPolicy.Kick:
                     // Keep it tracked until the kick fires, so an auto-respawn during the delay re-joins
                     // as an already-tracked bot (guarded in OnBotJoined) rather than resetting to defaults.
-                    Logger.Log($"Bot {bot.PlayerId} died (policy: Kick). Kicking in {DeathKickDelaySeconds}s.", LogLevel.INFO);
+                    Logger.Log($"Bot {bot.PlayerId} died (policy: Kick). Kicking in {KickDelaySeconds}s.", LogLevel.INFO);
                     controller.MarkAwaitingKick();
                     ScheduleDeathKick(bot.PlayerId, null, ai, policy, null);
                     break;
@@ -142,12 +149,12 @@ namespace MDS.Systems
                     if (spec == null || !deathPos.HasValue)
                     {
                         string reason = spec == null ? "has no spawn spec (random bot)" : "position unavailable";
-                        Logger.Log($"Bot {bot.PlayerId} died (policy: Replace) but {reason}. Kicking only (in {DeathKickDelaySeconds}s).", LogLevel.WARNING);
+                        Logger.Log($"Bot {bot.PlayerId} died (policy: Replace) but {reason}. Kicking only (in {KickDelaySeconds}s).", LogLevel.WARNING);
                         ScheduleDeathKick(bot.PlayerId, null, ai, policy, null);
                         break;
                     }
 
-                    Logger.Log($"Bot {bot.PlayerId} died (policy: Replace). Kicking in {DeathKickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
+                    Logger.Log($"Bot {bot.PlayerId} died (policy: Replace). Kicking in {KickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
                     ScheduleDeathKick(bot.PlayerId, spec, ai, policy, new BotPlacement(deathPos.Value, deathHeading));
                     break;
             }
@@ -197,12 +204,12 @@ namespace MDS.Systems
         private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
         {
             // 1) Wait so the killer is credited and the death plays out before the bot is removed.
-            yield return new WaitForSeconds(DeathKickDelaySeconds);
+            yield return new WaitForSeconds(KickDelaySeconds);
             KickBot(playerId);
 
             // 2) Spawn the replacement only AFTER a short gap, so the kick fully frees the bot slot
             //    first (kicking and respawning back-to-back can make the spawnSpecific fail).
-            yield return new WaitForSeconds(KickToSpawnDelaySeconds);
+            yield return new WaitForSeconds(ReplaceDelaySeconds);
             SpawnReplacement(replacementSpec, ai, death, placement);
         }
 
@@ -211,7 +218,7 @@ namespace MDS.Systems
             // Untrack only now (not at death time) so the bot stays tracked through the delay.
             Untrack(playerId);
             CarbonPlayerCommands.Despawn(playerId);
-            Logger.Log($"Bot {playerId} kicked; replacement (if any) in {KickToSpawnDelaySeconds}s.", LogLevel.DEBUG);
+            Logger.Log($"Bot {playerId} kicked; replacement (if any) in {ReplaceDelaySeconds}s.", LogLevel.DEBUG);
         }
 
         private static void SpawnReplacement(BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)

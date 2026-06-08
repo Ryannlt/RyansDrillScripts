@@ -31,6 +31,10 @@ namespace MDS.ConfigVariables
             RegisterConfigVariable(ConfigCommandEnum.SetGroupfightSpacing, new SetGroupfightSpacing());
             RegisterConfigVariable(ConfigCommandEnum.SetGroupfightStrategy, new SetGroupfightStrategy());
             RegisterConfigVariable(ConfigCommandEnum.SetOrientation, new SetOrientation());
+            RegisterConfigVariable(ConfigCommandEnum.SetBotDefaultAi, new SetBotDefaultAi());
+            RegisterConfigVariable(ConfigCommandEnum.SetBotDefaultDeathPolicy, new SetBotDefaultDeathPolicy());
+            RegisterConfigVariable(ConfigCommandEnum.SetBotKickDelay, new SetBotKickDelay());
+            RegisterConfigVariable(ConfigCommandEnum.SetBotReplaceDelay, new SetBotReplaceDelay());
 
             Logger.Log($"Registered {configCommands.Count} config variables.", LogLevel.DEBUG);
         }

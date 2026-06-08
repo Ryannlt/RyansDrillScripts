@@ -5,12 +5,12 @@ using MDS.Systems;
 namespace MDS.ConfigVariables
 {
     // Default death policy assigned to bots at spawn when none is specified inline.
-    // rc get/set botDefaultDeath.
+    // rc get/set botDefaultDeathPolicy.
     public class BotDefaultDeathConfigurable : IConfigurable
     {
         public ConfigurableEnum ConfigurableName => ConfigurableEnum.BotDefaultDeathPolicy;
 
-        public BotDeathPolicy DefaultPolicy { get; set; } = BotDeathPolicy.None;
+        public BotDeathPolicy DefaultPolicy { get; set; } = BotDeathPolicy.Kick;
 
         public bool ValidateSet(string[] args, out string errorMessage)
         {
@@ -18,7 +18,7 @@ namespace MDS.ConfigVariables
 
             if (args.Length != 1 || !EnumParser.TryParseEnumStrict(args[0], out BotDeathPolicy _))
             {
-                errorMessage = $"Invalid policy. Valid: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}. Usage: rc set botDefaultDeath <deathPolicyEnum>";
+                errorMessage = $"Invalid policy. Valid: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}. Usage: rc set botDefaultDeathPolicy <deathPolicyEnum>";
                 return false;
             }
 
@@ -31,7 +31,7 @@ namespace MDS.ConfigVariables
 
             if (args.Length > 0)
             {
-                errorMessage = "botDefaultDeath takes no arguments for 'get'. Usage: rc get botDefaultDeath";
+                errorMessage = "botDefaultDeathPolicy takes no arguments for 'get'. Usage: rc get botDefaultDeathPolicy";
                 return false;
             }
 

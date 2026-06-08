@@ -16,6 +16,10 @@ namespace MDS.ConfigVariables
         SetGroupfightDistance,
         SetGroupfightSpacing,
         SetGroupfightStrategy,
-        SetOrientation
+        SetOrientation,
+        SetBotDefaultAi,
+        SetBotDefaultDeathPolicy,
+        SetBotKickDelay,
+        SetBotReplaceDelay
     }
 }
