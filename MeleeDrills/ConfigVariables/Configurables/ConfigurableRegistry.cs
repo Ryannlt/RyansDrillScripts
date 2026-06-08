@@ -61,6 +61,8 @@ namespace MDS.ConfigVariables
             RegisterConfigurable(new OrientationConfigurable());
             RegisterConfigurable(new BotDefaultAiConfigurable());
             RegisterConfigurable(new BotDefaultDeathConfigurable());
+            RegisterConfigurable(new BotKickDelayConfigurable());
+            RegisterConfigurable(new BotReplaceDelayConfigurable());
 
             Logger.Log($"Total configurables registered: {registry.Count}", LogLevel.INFO);
         }

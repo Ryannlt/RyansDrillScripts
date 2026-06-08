@@ -9,7 +9,7 @@ namespace MDS.ConsoleCommands
     // Parses the shared positional spawn grammar used by 'spawn' and 'summon':
     //   [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
     // - faction/class: provide both or neither; omitted => default to the caller's faction/class.
-    // - ai/death: omitted => config defaults (botDefaultAi / botDefaultDeath); provide inline to override.
+    // - ai/death: omitted => config defaults (botDefaultAi / botDefaultDeathPolicy); provide inline to override.
     // - name/regtag/uniformId: require an explicit faction+class.
     // Strict positional order:
     //   [count] [faction [class]] [ai] [death] [name [regtag [uniformId]]]
