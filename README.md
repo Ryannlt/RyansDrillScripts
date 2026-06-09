@@ -101,7 +101,7 @@ All commands must be prefixed with `rc` and require admin.
 **Usage:** `rc xvx <attacking:int> <defending:int> [strategy] [distance:float] [spacing:float] [orientation]`
 
 * Spawns an X‑v‑X match inside the arena using the selected strategy and parameters.
-* Shorthand calls are supported using defaults — e.g. `rc 3v2`, `rc 20v1`.
+* Shorthand calls are supported using defaults. e.g. `rc 3v2`, `rc 20v1`.
 * **Defaults (configurable):** `xvxStrategy`, `xvxDistance`, `xvxSpacing`
 * **Examples:**
 
@@ -254,7 +254,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 **Usage:** `rc bot summon [faction class] [ai] [death] [name [regtag [uniformId]]]`
 
 * Spawns a single bot **at your position**, facing your direction.
-* Same faction/class/ai/death defaulting as `spawn` (no count — multiple bots would stack).
+* Same faction/class/ai/death defaulting as `spawn`.
 * **Examples:**
 
   ```
@@ -269,7 +269,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 * Sets the AI behaviour for one or more tracked bots immediately.
 * **Target:** `all`, `attacking`, `defending`, `<faction>` (e.g. `French`), or `<playerId>`
-* **AI types:** `None` *(Phase 1 will add Dummy, Facing, Melee, etc.)*
+* **AI types:** `None` *(New AI types yet to be added)*
 * **Examples:**
 
   ```
@@ -285,9 +285,9 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 * Sets the death policy for one or more tracked bots.
 * **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
 * **Policies:**
-  * `None` — do nothing when the bot dies
+  * `None` — do nothing, defaulting to in game handling (They respawn at a random spawn as a random class)
   * `Kick` — kick the bot after `botKickDelay` seconds (lets the kill register)
-  * `Replace` — kick then re‑spawn with the same identity (name, regtag, uniform, faction, class)
+  * `Replace` — kick then re-spawn with the same identity (name, regtag, uniform, faction, class) at death location
 * **Examples:**
 
   ```
@@ -392,7 +392,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
   * **args:** `count (int, > 0)`
   * **default:** `10`
-* **lineSpacing** — Lateral spacing in metres between bots in a line. Tune until bots stand shoulder‑to‑shoulder.
+* **lineSpacing** — Lateral spacing in metres between bots in a line. Set so bots will be shoulder to shoulder.
 
   * **args:** `metres (float, > 0)`
   * **default:** `0.55`
@@ -487,7 +487,7 @@ mod_variable_local MDS:SpawnLine:20,30,270,10,British,ArmyLineInfantry
 * Automatic repeating drills with user customization
 * Modded UI
 * Multi‑arena support
-* Phase 1 bot AI (dummy stabber, facing bot, melee state machine)
+* Bot AI (Autostab, Autoblock, 1v1Bot)
 
 ---
 
