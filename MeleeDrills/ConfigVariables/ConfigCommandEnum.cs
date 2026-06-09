@@ -20,6 +20,8 @@ namespace MDS.ConfigVariables
         SetBotDefaultAi,
         SetBotDefaultDeathPolicy,
         SetBotKickDelay,
-        SetBotReplaceDelay
+        SetBotReplaceDelay,
+        SetLineBotCount,
+        SetLineSpacing
     }
 }

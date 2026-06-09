@@ -9,7 +9,9 @@ namespace MDS.ConsoleCommands
         XvX,
         Groupfight,
         ShootingTraining,
-        Bot
+        Bot,
+        SummonLine,
+        SpawnLine
         // Add more command types here as needed
     }
 }
