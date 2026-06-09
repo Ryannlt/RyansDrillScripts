@@ -54,6 +54,24 @@ namespace MDS.Systems
             Logger.Log($"Requested {count} bot(s). Spec: {(spec == null ? "random" : $"{spec.Faction}/{spec.Class}")}, AI {ai}, death {death}.", LogLevel.INFO);
         }
 
+        // Spawns one bot per placement, all sharing the same spec/ai/death (used by line formations).
+        public static void SpawnBotsAt(IReadOnlyList<BotPlacement> placements, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death)
+        {
+            if (spec == null)
+            {
+                Logger.Log("SpawnBotsAt requires a spec (formations can't use random spawn).", LogLevel.WARNING);
+                return;
+            }
+
+            foreach (var placement in placements)
+            {
+                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement });
+                CarbonPlayerCommands.SpawnSpecific(spec);
+            }
+
+            Logger.Log($"Requested {placements.Count} bot(s) in formation. Spec: {spec.Faction}/{spec.Class}, AI {ai}, death {death}.", LogLevel.INFO);
+        }
+
         public static bool SetAi(int playerId, BotAiEnum ai)
         {
             var bot = _bots.FirstOrDefault(b => b.PlayerId == playerId);

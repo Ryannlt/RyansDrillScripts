@@ -35,6 +35,8 @@ namespace MDS.ConfigVariables
             RegisterConfigVariable(ConfigCommandEnum.SetBotDefaultDeathPolicy, new SetBotDefaultDeathPolicy());
             RegisterConfigVariable(ConfigCommandEnum.SetBotKickDelay, new SetBotKickDelay());
             RegisterConfigVariable(ConfigCommandEnum.SetBotReplaceDelay, new SetBotReplaceDelay());
+            RegisterConfigVariable(ConfigCommandEnum.SetLineBotCount, new SetLineBotCount());
+            RegisterConfigVariable(ConfigCommandEnum.SetLineSpacing, new SetLineSpacing());
 
             Logger.Log($"Registered {configCommands.Count} config variables.", LogLevel.DEBUG);
         }
