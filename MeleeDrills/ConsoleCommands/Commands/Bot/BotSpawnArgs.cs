@@ -9,6 +9,7 @@ namespace MDS.ConsoleCommands
     // Parses the shared positional spawn grammar used by 'spawn' and 'summon':
     //   [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
     // - faction/class: provide both or neither; omitted => default to the caller's faction/class.
+    //   faction accepts attacking/defending (resolved to the round's factions) or a FactionCountry name.
     // - ai/death: omitted => config defaults (botDefaultAi / botDefaultDeathPolicy); provide inline to override.
     // - name/regtag/uniformId: require an explicit faction+class.
     // Strict positional order:
@@ -29,6 +30,64 @@ namespace MDS.ConsoleCommands
         // allowCount: spawn accepts a leading count; summon does not (it's always a single bot).
         public static bool ValidateShape(string[] args, bool allowCount, out string error) =>
             ParseTokens(args, allowCount, out _, out error);
+
+        // Map-load line resolution (no caller). count/faction/class are all optional, with LINE defaults:
+        //   count   => lineBotCount configurable
+        //   faction => "attacking" (kept as a TOKEN and resolved later against the live round)
+        //   class   => ArmyLineInfantry
+        // The faction stays a token ("attacking" | "defending" | a FactionCountry name) because attacking
+        // and defending swap per round, so it can only be resolved at spawn time - the LineSpec carries
+        // the token for the caller (LineManager) to resolve. ai/death default to config; name/regtag/
+        // uniformId are optional extras. Reuses the same positional tail parser as the runtime grammar.
+        public static bool TryResolveLine(string[] args, out LineSpec spec, out string error)
+        {
+            spec = default;
+            error = string.Empty;
+
+            const string order = "[count] [faction class] [ai] [death] [name [regtag [uniformId]]]";
+            int i = 0;
+
+            int count = ((LineBotCountConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.LineBotCount)).LineBotCount;
+            if (i < args.Length && int.TryParse(args[i], out int c))
+            {
+                if (c <= 0) { error = "Count must be a positive integer."; return false; }
+                count = c;
+                i++;
+            }
+
+            string factionToken = "attacking";
+            if (i < args.Length && FactionTokens.IsToken(args[i]))
+            {
+                factionToken = args[i];
+                i++;
+            }
+
+            PlayerClass playerClass = PlayerClass.ArmyLineInfantry;
+            if (i < args.Length && EnumParser.TryParseEnumStrict(args[i], out PlayerClass pc))
+            {
+                playerClass = pc;
+                i++;
+            }
+
+            // name is always allowed here (faction always resolves to a default, so the "needs explicit
+            // faction" rule from the runtime grammar doesn't apply).
+            if (!ParseTail(args, ref i, allowName: true, order,
+                    out BotAiEnum? ai, out BotDeathPolicy? death, out string name, out string regTag, out int? uniformId, out error))
+                return false;
+
+            spec = new LineSpec
+            {
+                Count = count,
+                FactionToken = factionToken,
+                Class = playerClass,
+                Name = name,
+                RegTag = regTag,
+                UniformId = uniformId,
+                Ai = ai ?? ((BotDefaultAiConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultAi)).DefaultAi,
+                Death = death ?? ((BotDefaultDeathConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.BotDefaultDeathPolicy)).DefaultPolicy
+            };
+            return true;
+        }
 
         // Full resolution incl. caller defaults; used by Execute which has the caller's playerId.
         public static bool TryResolve(string[] args, int callerPlayerId, bool allowCount, out BotSpawnArgs result, out string error)
@@ -101,8 +160,9 @@ namespace MDS.ConsoleCommands
                 i++;
             }
 
-            // optional faction (and optional class)
-            if (i < args.Length && EnumParser.TryParseEnumStrict(args[i], out FactionCountry faction))
+            // optional faction (and optional class). Accepts attacking/defending (resolved now against
+            // the live round, since these are runtime commands) as well as a FactionCountry name.
+            if (i < args.Length && FactionTokens.TryResolve(args[i], out FactionCountry faction))
             {
                 p.Faction = faction;
                 p.HasFaction = true;
@@ -117,49 +177,75 @@ namespace MDS.ConsoleCommands
                 }
             }
 
-            // ai slot - if a token is present here it MUST be a valid AI (no silent fallthrough to name).
+            if (!ParseTail(args, ref i, allowName: p.HasFaction, order,
+                    out BotAiEnum? ai, out BotDeathPolicy? death, out string name, out string regTag, out int? uniformId, out error))
+                return false;
+
+            p.Ai = ai;
+            p.Death = death;
+            p.Name = name;
+            p.RegTag = regTag;
+            p.UniformId = uniformId;
+
+            return true;
+        }
+
+        // Parses the shared positional tail starting at args[i]: [ai] [death] [name [regtag [uniformId]]].
+        // The ai/death slots, if present, MUST parse (a wrong token errors rather than being taken as a
+        // name). 'allowName' gates whether trailing name/regtag/uniformId tokens are permitted.
+        private static bool ParseTail(string[] args, ref int i, bool allowName, string order,
+            out BotAiEnum? ai, out BotDeathPolicy? death, out string name, out string regTag, out int? uniformId, out string error)
+        {
+            ai = null;
+            death = null;
+            name = null;
+            regTag = null;
+            uniformId = null;
+            error = string.Empty;
+
+            // ai slot
             if (i < args.Length)
             {
-                if (!EnumParser.TryParseEnumStrict(args[i], out BotAiEnum ai))
+                if (!EnumParser.TryParseEnumStrict(args[i], out BotAiEnum a))
                 {
                     error = $"Unknown AI '{args[i]}'. Valid: {string.Join(", ", Enum.GetNames(typeof(BotAiEnum)))}. Order: {order}.";
                     return false;
                 }
-                p.Ai = ai;
+                ai = a;
                 i++;
             }
 
-            // death slot - if a token is present here it MUST be a valid death policy.
+            // death slot
             if (i < args.Length)
             {
-                if (!EnumParser.TryParseEnumStrict(args[i], out BotDeathPolicy death))
+                if (!EnumParser.TryParseEnumStrict(args[i], out BotDeathPolicy d))
                 {
                     error = $"Unknown death policy '{args[i]}'. Valid: {string.Join(", ", Enum.GetNames(typeof(BotDeathPolicy)))}. Order: {order}.";
                     return false;
                 }
-                p.Death = death;
+                death = d;
                 i++;
             }
 
-            // optional name / regtag / uniformId (require at least an explicit faction)
+            // name / regtag / uniformId
             if (i < args.Length)
             {
-                if (!p.HasFaction)
+                if (!allowName)
                 {
                     error = $"Unexpected argument '{args[i]}'. Order: {order}.";
                     return false;
                 }
 
-                p.Name = args[i++];
-                if (i < args.Length) p.RegTag = args[i++];
+                name = args[i++];
+                if (i < args.Length) regTag = args[i++];
                 if (i < args.Length)
                 {
-                    if (!int.TryParse(args[i], out int uniformId))
+                    if (!int.TryParse(args[i], out int uid))
                     {
                         error = $"Invalid uniformId '{args[i]}'. Must be an integer.";
                         return false;
                     }
-                    p.UniformId = uniformId;
+                    uniformId = uid;
                     i++;
                 }
                 if (i < args.Length)

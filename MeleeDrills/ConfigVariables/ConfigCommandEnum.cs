@@ -22,6 +22,7 @@ namespace MDS.ConfigVariables
         SetBotKickDelay,
         SetBotReplaceDelay,
         SetLineBotCount,
-        SetLineSpacing
+        SetLineSpacing,
+        SpawnLine
     }
 }

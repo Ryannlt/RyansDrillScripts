@@ -17,11 +17,9 @@ namespace MDS.Systems
         {
             if (string.IsNullOrEmpty(token)) return false;
             if (int.TryParse(token, out _)) return true;   // playerId
+            if (token.Equals("all", StringComparison.OrdinalIgnoreCase)) return true;
 
-            string t = token.ToLowerInvariant();
-            if (t == "all" || t == "attacking" || t == "defending") return true;
-
-            return Enum.TryParse<FactionCountry>(token, true, out _);
+            return FactionTokens.IsToken(token);           // attacking | defending | FactionCountry name
         }
 
         // Returns the playerIds of tracked bots matching the token (empty if none match / token invalid).
@@ -37,32 +35,21 @@ namespace MDS.Systems
                 return result;
             }
 
-            string t = token.ToLowerInvariant();
-
-            if (t == "all")
+            if (token.Equals("all", StringComparison.OrdinalIgnoreCase))
             {
                 foreach (var b in BotManager.Bots)
                     result.Add(b.PlayerId);
                 return result;
             }
 
-            FactionCountry? faction = ResolveFaction(t, token);
-            if (faction.HasValue)
+            if (FactionTokens.TryResolve(token, out FactionCountry faction))
             {
                 foreach (var b in BotManager.Bots)
-                    if (b.Bot.Faction == faction.Value)
+                    if (b.Bot.Faction == faction)
                         result.Add(b.PlayerId);
             }
 
             return result;
-        }
-
-        private static FactionCountry? ResolveFaction(string lower, string original)
-        {
-            if (lower == "attacking") return StateTracker.AttackingFaction;
-            if (lower == "defending") return StateTracker.DefendingFaction;
-            if (Enum.TryParse(original, true, out FactionCountry parsed)) return parsed;
-            return null;
         }
     }
 }

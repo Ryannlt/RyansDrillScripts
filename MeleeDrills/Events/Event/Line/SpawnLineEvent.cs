@@ -1,12 +1,11 @@
-using System.Collections.Generic;
 using UnityEngine;
 using MDS.Core;
 using MDS.Systems;
 
 namespace MDS.Events
 {
-    // Spawns a shoulder-to-shoulder line of bots centred on 'center', all facing 'rotation' (deg from
-    // North). Caller-agnostic and reusable (summonLine/spawnLine commands + future map-load populate).
+    // Command-facing trigger for a bot line. Validates the param shape then delegates the actual
+    // geometry/spawn to LineManager.SpawnLine (shared with the map-load auto-populate path).
     // Parameters: (Vector2 center, float rotation, int count, float spacing, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death)
     public class SpawnLineEvent : IEvent
     {
@@ -46,22 +45,7 @@ namespace MDS.Events
             var ai = (BotAiEnum)parameters[5];
             var death = (BotDeathPolicy)parameters[6];
 
-            // 'right' is perpendicular to the facing (the line runs along it); every bot faces 'rotation'.
-            // Heading is degrees from North to match inputRotation - verify in-game with summon facing.
-            float rad = rotation * Mathf.Deg2Rad;
-            Vector2 right = new Vector2(Mathf.Cos(rad), -Mathf.Sin(rad));
-            float startOffset = -((count - 1) * spacing) / 2f;
-
-            var placements = new List<BotPlacement>(count);
-            for (int i = 0; i < count; i++)
-            {
-                Vector2 pos2D = center + right * (startOffset + i * spacing);
-                float y = TerrainSampler.GetYAt(pos2D);
-                placements.Add(new BotPlacement(new Vector3(pos2D.x, y, pos2D.y), rotation));
-            }
-
-            BotManager.SpawnBotsAt(placements, spec, ai, death);
-            Logger.Log($"SpawnLineEvent: {count} bots, spacing {spacing:F2}, facing {rotation:F0} deg.", LogLevel.INFO);
+            LineManager.SpawnLine(center, rotation, count, spacing, spec, ai, death);
         }
     }
 }
