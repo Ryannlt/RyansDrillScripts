@@ -157,6 +157,7 @@ All commands must be prefixed with `rc` and require admin.
 
 * Spawns a shoulder‑to‑shoulder line of bots **centred on your position**, facing your direction.
 * `count` overrides `lineBotCount` for this call; faction/class default to yours if omitted.
+* `faction` accepts `attacking` / `defending` (resolved to the round's factions) as well as a faction name.
 * **Defaults (configurable):** `lineBotCount`, `lineSpacing`, `botDefaultAi`, `botDefaultDeathPolicy`
 * **Examples:**
 
@@ -172,6 +173,7 @@ All commands must be prefixed with `rc` and require admin.
 
 * Spawns a line of bots at world position `(x, z)` facing `rotation` degrees from North.
 * `count` overrides `lineBotCount` for this call; faction/class default to caller's if omitted.
+* `faction` accepts `attacking` / `defending` (resolved to the round's factions) as well as a faction name.
 * **Defaults (configurable):** `lineBotCount`, `lineSpacing`, `botDefaultAi`, `botDefaultDeathPolicy`
 * **Examples:**
 
@@ -224,6 +226,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 * Spawns one or more specific bots at a random server spawn point.
 * `faction` and `class` default to the caller's current faction/class if omitted. Providing `faction` without `class` uses the caller's class.
+* `faction` accepts `attacking` / `defending` (resolved to the round's factions) as well as a faction name (e.g. `French`).
 * `ai` and `death` default to `botDefaultAi` and `botDefaultDeathPolicy`.
 * Arguments are **strictly positional** — omit from the right, not the middle.
 * **Examples:**
@@ -440,15 +443,22 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 * **SetLineBotCount** — `count(int)`
 * **SetLineSpacing** — `metres(float)`
-* **SpawnLine** — `x,z,rotation[,count][,faction,class][,ai][,death]`
+* **SpawnLine** — `x,z,rotation[,count][,faction][,class][,ai][,death][,name[,regtag[,uniformId]]]`
 
-  Schedules a line of bots to spawn when the round begins. Can be specified multiple times for multiple lines. Faction/class/ai/death default to server config values if omitted.
+  Schedules a shoulder‑to‑shoulder bot line to spawn when the round begins. Specify it multiple times for multiple lines (e.g. two opposing lines). Mirrors the `rc spawnLine` grammar, with map‑load defaults instead of a caller:
+  * `x,z,rotation` — required. World position and facing (degrees from North).
+  * `count` — optional. Defaults to `lineBotCount`.
+  * `faction` — optional. `attacking` (default), `defending`, or a faction name (e.g. `French`). `attacking`/`defending` resolve against the live round at spawn time, so the same config works across maps.
+  * `class` — optional. Defaults to `ArmyLineInfantry`.
+  * `ai,death` — optional. Default to `botDefaultAi` / `botDefaultDeathPolicy`.
+  * `name,regtag,uniformId` — optional identity extras.
 
   *Examples:*
 
   ```
   mod_variable_local MDS:SpawnLine:-20,30,90
-  mod_variable_local MDS:SpawnLine:-20,30,90,10,French,ArmyLineInfantry,None,Replace
+  mod_variable_local MDS:SpawnLine:-20,30,90,attacking
+  mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace
   ```
 
 ---
@@ -476,8 +486,8 @@ mod_variable_local MDS:SetOrientation:NorthSouth
 mod_variable_local MDS:SetBotDefaultDeathPolicy:Replace
 mod_variable_local MDS:SetBotKickDelay:2
 mod_variable_local MDS:SetBotReplaceDelay:0.5
-mod_variable_local MDS:SpawnLine:-20,30,90,10,French,ArmyLineInfantry
-mod_variable_local MDS:SpawnLine:20,30,270,10,British,ArmyLineInfantry
+mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
+mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry
 ```
 
 ---

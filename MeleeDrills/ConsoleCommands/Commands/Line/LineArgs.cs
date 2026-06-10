@@ -2,6 +2,7 @@ using UnityEngine;
 using MDS.ConfigVariables;
 using MDS.Core;
 using MDS.Events;
+using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
@@ -28,16 +29,21 @@ namespace MDS.ConsoleCommands
             return BotSpawnArgs.TryResolve(specArgs, callerPlayerId, allowCount: false, out spec, out error);
         }
 
-        // Builds the line params from the resolved spec + config spacing and triggers SpawnLineEvent.
-        public static void Trigger(int playerId, Vector2 center, float rotation, int count, BotSpawnArgs spec)
+        // Core dispatch: builds line params from the resolved spec + live config spacing and triggers
+        // SpawnLineEvent. Caller-agnostic (no player messaging) - shared by the command and map-load paths.
+        public static bool TriggerLine(Vector2 center, float rotation, int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, out string error)
         {
             float spacing = ((LineSpacingConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.LineSpacing)).LineSpacing;
 
-            bool success = EventDispatcher.Trigger(EventEnum.SpawnLine,
-                new object[] { center, rotation, count, spacing, spec.Spec, spec.Ai, spec.Death },
-                out string error);
+            return EventDispatcher.Trigger(EventEnum.SpawnLine,
+                new object[] { center, rotation, count, spacing, spec, ai, death },
+                out error);
+        }
 
-            if (!success)
+        // Builds the line from a resolved spec and messages the calling admin with the outcome.
+        public static void Trigger(int playerId, Vector2 center, float rotation, int count, BotSpawnArgs spec)
+        {
+            if (!TriggerLine(center, rotation, count, spec.Spec, spec.Ai, spec.Death, out string error))
             {
                 Logger.Log($"SpawnLine failed: {error}", LogLevel.WARNING);
                 CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");

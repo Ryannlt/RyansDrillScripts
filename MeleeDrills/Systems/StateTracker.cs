@@ -64,6 +64,7 @@ namespace MDS.Systems
 
             NewRoundCleanup();
             ArenaManager.ApplyStagedArenas();
+            LineManager.SpawnStagedLines(); // map-load auto-populate (after BotManager was reset above)
 
             Logger.Log($"Round {roundId} on {mapName}. Mode: {gameplayMode}, Type: {gameType}. Attacking: {attackingFaction}, Defending: {defendingFaction}.", LogLevel.INFO);
         }
