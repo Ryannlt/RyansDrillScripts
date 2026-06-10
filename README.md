@@ -153,7 +153,7 @@ All commands must be prefixed with `rc` and require admin.
 
 ### `summonLine`
 
-**Usage:** `rc summonLine [count] [faction class] [ai] [death] [name [regtag [uniformId]]]`
+**Usage:** `rc summonLine [count] [faction] [class] [ai] [death] [name [regtag [uniformId]]]`
 
 * Spawns a shoulder‑to‑shoulder line of bots **centred on your position**, facing your direction.
 * `count` overrides `lineBotCount` for this call; faction/class default to yours if omitted.
@@ -169,7 +169,7 @@ All commands must be prefixed with `rc` and require admin.
 
 ### `spawnLine`
 
-**Usage:** `rc spawnLine <x> <z> <rotation> [count] [faction class] [ai] [death] [name [regtag [uniformId]]]`
+**Usage:** `rc spawnLine <x> <z> <rotation> [count] [faction] [class] [ai] [death] [name [regtag [uniformId]]]`
 
 * Spawns a line of bots at world position `(x, z)` facing `rotation` degrees from North.
 * `count` overrides `lineBotCount` for this call; faction/class default to caller's if omitted.
@@ -234,7 +234,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
   ```
   rc bot spawn
   rc bot spawn 5
-  rc bot spawn French ArmyLineInfantry
+  rc bot spawn Attacking ArmyLineInfantry
   rc bot spawn 3 French ArmyLineInfantry None Replace
   rc bot spawn 1 French ArmyLineInfantry None Replace Soldier 1stBattalion 14
   ```
@@ -254,7 +254,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 ### `summon`
 
-**Usage:** `rc bot summon [faction class] [ai] [death] [name [regtag [uniformId]]]`
+**Usage:** `rc bot summon [faction] [class] [ai] [death] [name [regtag [uniformId]]]`
 
 * Spawns a single bot **at your position**, facing your direction.
 * Same faction/class/ai/death defaulting as `spawn`.
@@ -263,7 +263,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
   ```
   rc bot summon
   rc bot summon French ArmyLineInfantry
-  rc bot summon French ArmyLineInfantry None Replace
+  rc bot summon Defending ArmyLineInfantry None Replace
   ```
 
 ### `setBotAi`
@@ -457,8 +457,8 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
   ```
   mod_variable_local MDS:SpawnLine:-20,30,90
-  mod_variable_local MDS:SpawnLine:-20,30,90,attacking
-  mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace
+  mod_variable_local MDS:SpawnLine:-20,30,90,French
+  mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
   ```
 
 ---
@@ -487,7 +487,7 @@ mod_variable_local MDS:SetBotDefaultDeathPolicy:Replace
 mod_variable_local MDS:SetBotKickDelay:2
 mod_variable_local MDS:SetBotReplaceDelay:0.5
 mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
-mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry
+mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
 ```
 
 ---
@@ -496,7 +496,7 @@ mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry
 
 * Automatic repeating drills with user customization
 * Modded UI
-* Multi‑arena support
+* Multi-arena support
 * Bot AI (Autostab, Autoblock, 1v1Bot)
 
 ---
