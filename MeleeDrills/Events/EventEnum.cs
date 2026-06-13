@@ -5,7 +5,13 @@ namespace MDS.Events
         TestEvent,
         OpenMelee,
         XvX,
-        ShootingTraining
+        ShootingTraining,
+        SpawnBots,
+        RemoveBots,
+        SetBotAi,
+        SetBotDeathPolicy,
+        RotateBots,
+        SpawnLine
         // Add more as needed
     }
 }

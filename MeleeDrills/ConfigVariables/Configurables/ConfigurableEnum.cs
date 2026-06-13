@@ -17,6 +17,12 @@ namespace MDS.ConfigVariables
         GroupfightDistance,
         GroupfightSpacing,
         GroupfightStrategy,
-        Orientation
+        Orientation,
+        BotDefaultAi,
+        BotDefaultDeathPolicy,
+        BotKickDelay,
+        BotReplaceDelay,
+        LineBotCount,
+        LineSpacing
     }
 }

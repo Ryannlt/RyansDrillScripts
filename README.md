@@ -9,17 +9,15 @@
 Prefix all commands with `rc` and run as a logged-in server admin.
 
 **Arena**
-Copy/paste:
 
 ```
 rc set ArenaCorner1
 rc set ArenaCorner2
 ```
 
-With coordinates (replace placeholders): `rc set ArenaCorner1 [x,z]`, `rc set ArenaCorner2 [x,z]`
+With coordinates: `rc set ArenaCorner1 [x,z]`, `rc set ArenaCorner2 [x,z]`
 
 **Drills**
-Copy/paste examples:
 
 ```
 rc 3v3
@@ -27,20 +25,30 @@ rc groupfight
 rc openmelee 2 7
 ```
 
+**Bots**
+
+```
+rc bot spawn 5 French ArmyLineInfantry
+rc bot summon French ArmyLineInfantry None Replace
+rc bot remove all
+rc summonLine 10 French ArmyLineInfantry
+rc spawnLine -20 30 90 10 French ArmyLineInfantry
+```
+
 **Runtime Config**
-Copy/paste examples:
 
 ```
 rc get xvxDistance
 rc get Players all
 rc set xvxDistance 5
+rc set lineBotCount 10
 ```
 
 ---
 
 ## Overview
 
-MDS tracks round and player state to run custom drills and utility commands. Use standard `rc` commands and **modded config variables** to tailor drills to your server’s needs.
+MDS tracks round and player state to run custom drills and utility commands. Use standard `rc` commands and **modded config variables** to tailor drills to your server's needs.
 
 ---
 
@@ -58,6 +66,12 @@ MDS tracks round and player state to run custom drills and utility commands. Use
    rc 3v3
    rc groupfight
    rc openmelee 2 7
+   ```
+3. **Spawn bots** (examples):
+
+   ```
+   rc bot spawn French ArmyLineInfantry
+   rc summonLine 5
    ```
 
 > Commands are **case‑insensitive**. Arguments in `<>` are required; `[ ]` are optional.
@@ -87,7 +101,7 @@ All commands must be prefixed with `rc` and require admin.
 **Usage:** `rc xvx <attacking:int> <defending:int> [strategy] [distance:float] [spacing:float] [orientation]`
 
 * Spawns an X‑v‑X match inside the arena using the selected strategy and parameters.
-* Shorthand calls are supported using defaults — e.g. `rc 3v2`, `rc 20v1`.
+* Shorthand calls are supported using defaults. e.g. `rc 3v2`, `rc 20v1`.
 * **Defaults (configurable):** `xvxStrategy`, `xvxDistance`, `xvxSpacing`
 * **Examples:**
 
@@ -122,11 +136,57 @@ All commands must be prefixed with `rc` and require admin.
   rc openmelee
   ```
 
+### `bot`
+
+**Usage:** `rc bot <subcommand> [args]`
+
+* Central command for spawning, summoning, and managing bots.
+* Subcommands: `spawn`, `spawnRandom`, `summon`, `setBotAi`, `setBotDeathPolicy`, `remove`, `list`
+* See **[Bot Subcommands](#bot-subcommands)** section for full details.
+* **Examples:**
+
+  ```
+  rc bot spawn 3 French ArmyLineInfantry
+  rc bot remove all
+  rc bot list
+  ```
+
+### `summonLine`
+
+**Usage:** `rc summonLine [count] [faction] [class] [ai] [death] [name [regtag [uniformId]]]`
+
+* Spawns a shoulder‑to‑shoulder line of bots **centred on your position**, facing your direction.
+* `count` overrides `lineBotCount` for this call; faction/class default to yours if omitted.
+* `faction` accepts `attacking` / `defending` (resolved to the round's factions) as well as a faction name.
+* **Defaults (configurable):** `lineBotCount`, `lineSpacing`, `botDefaultAi`, `botDefaultDeathPolicy`
+* **Examples:**
+
+  ```
+  rc summonLine
+  rc summonLine 5
+  rc summonLine 8 French ArmyLineInfantry None Replace
+  ```
+
+### `spawnLine`
+
+**Usage:** `rc spawnLine <x> <z> <rotation> [count] [faction] [class] [ai] [death] [name [regtag [uniformId]]]`
+
+* Spawns a line of bots at world position `(x, z)` facing `rotation` degrees from North.
+* `count` overrides `lineBotCount` for this call; faction/class default to caller's if omitted.
+* `faction` accepts `attacking` / `defending` (resolved to the round's factions) as well as a faction name.
+* **Defaults (configurable):** `lineBotCount`, `lineSpacing`, `botDefaultAi`, `botDefaultDeathPolicy`
+* **Examples:**
+
+  ```
+  rc spawnLine -20 30 90 10 French ArmyLineInfantry
+  rc spawnLine 0 50 0
+  ```
+
 ### `get`
 
 **Usage:** `rc get <Configurable> [additional arguments]`
 
-* Mirrors Holdfast’s `rc get` to read **mod configurables** and **mod data** at runtime.
+* Mirrors Holdfast's `rc get` to read **mod configurables** and **mod data** at runtime.
 * Additional mod data shortcuts:
 
   ```
@@ -145,27 +205,140 @@ All commands must be prefixed with `rc` and require admin.
 
 **Usage:** `rc set <Configurable> <Value> [additional arguments]`
 
-* Mirrors Holdfast’s `rc set` to set **mod configurables** at runtime.
+* Mirrors Holdfast's `rc set` to set **mod configurables** at runtime.
 * **Example:**
 
   ```
   rc set xvxDistance 5
+  rc set lineBotCount 10
+  rc set lineSpacing 0.55
+  ```
+
+---
+
+## Bot Subcommands
+
+All bot subcommands are accessed via `rc bot <subcommand> [args]`.
+
+### `spawn`
+
+**Usage:** `rc bot spawn [count] [faction class] [ai] [death] [name [regtag [uniformId]]]`
+
+* Spawns one or more specific bots at a random server spawn point.
+* `faction` and `class` default to the caller's current faction/class if omitted. Providing `faction` without `class` uses the caller's class.
+* `faction` accepts `attacking` / `defending` (resolved to the round's factions) as well as a faction name (e.g. `French`).
+* `ai` and `death` default to `botDefaultAi` and `botDefaultDeathPolicy`.
+* Arguments are **strictly positional** — omit from the right, not the middle.
+* **Examples:**
+
+  ```
+  rc bot spawn
+  rc bot spawn 5
+  rc bot spawn Attacking ArmyLineInfantry
+  rc bot spawn 3 French ArmyLineInfantry None Replace
+  rc bot spawn 1 French ArmyLineInfantry None Replace Soldier 1stBattalion 14
+  ```
+
+### `spawnRandom`
+
+**Usage:** `rc bot spawnRandom [count]`
+
+* Spawns one or more bots with a **fully random** faction and class.
+* AI and death policy default to `botDefaultAi` and `botDefaultDeathPolicy`.
+* **Examples:**
+
+  ```
+  rc bot spawnRandom
+  rc bot spawnRandom 5
+  ```
+
+### `summon`
+
+**Usage:** `rc bot summon [faction] [class] [ai] [death] [name [regtag [uniformId]]]`
+
+* Spawns a single bot **at your position**, facing your direction.
+* Same faction/class/ai/death defaulting as `spawn`.
+* **Examples:**
+
+  ```
+  rc bot summon
+  rc bot summon French ArmyLineInfantry
+  rc bot summon Defending ArmyLineInfantry None Replace
+  ```
+
+### `setBotAi`
+
+**Usage:** `rc bot setBotAi <target> <ai>`
+
+* Sets the AI behaviour for one or more tracked bots immediately.
+* **Target:** `all`, `attacking`, `defending`, `<faction>` (e.g. `French`), or `<playerId>`
+* **AI types:** `None` *(New AI types yet to be added)*
+* **Examples:**
+
+  ```
+  rc bot setBotAi all None
+  rc bot setBotAi French None
+  rc bot setBotAi 42 None
+  ```
+
+### `setBotDeathPolicy`
+
+**Usage:** `rc bot setBotDeathPolicy <target> <policy>`
+
+* Sets the death policy for one or more tracked bots.
+* **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
+* **Policies:**
+  * `None` — do nothing, defaulting to in game handling (They respawn at a random spawn as a random class)
+  * `Kick` — kick the bot after `botKickDelay` seconds (lets the kill register)
+  * `Replace` — kick then re-spawn with the same identity (name, regtag, uniform, faction, class) at death location
+* **Examples:**
+
+  ```
+  rc bot setBotDeathPolicy all Kick
+  rc bot setBotDeathPolicy French Replace
+  rc bot setBotDeathPolicy 42 None
+  ```
+
+### `remove`
+
+**Usage:** `rc bot remove <target>`
+
+* Kicks (removes) one or more bots from the server immediately.
+* **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
+* **Examples:**
+
+  ```
+  rc bot remove all
+  rc bot remove French
+  rc bot remove 42
+  ```
+
+### `list`
+
+**Usage:** `rc bot list`
+
+* Prints all currently tracked bots to your private messages.
+* Shows player ID, faction/class, AI type, death policy, and spawn status.
+* **Example:**
+
+  ```
+  rc bot list
   ```
 
 ---
 
 ## Configurables
 
-*(Defaults shown are tuned for Palisaid Arena A1.)*
+*(Defaults shown are tuned for Palisade Arena A1.)*
 
-* **ArenaCorner1** — The x,z coordinate of the 1st corner of the arena play area.
-
-  * **args:** `x z` (floats) or none (uses player position)
-  * **default:** Not set by default
-* **ArenaCorner2** — The x,z coordinate of the 2nd corner of the arena play area.
+* **ArenaCorner1** — x,z coordinate of the 1st corner of the arena play area.
 
   * **args:** `x z` (floats) or none (uses player position)
-  * **default:** Not set by default
+  * **default:** Not set
+* **ArenaCorner2** — x,z coordinate of the 2nd corner of the arena play area.
+
+  * **args:** `x z` (floats) or none (uses player position)
+  * **default:** Not set
 * **xvxDistance** — Distance between attacking and defending faction lines for `xvx`.
 
   * **args:** `distance (float)`
@@ -198,10 +371,34 @@ All commands must be prefixed with `rc` and require admin.
 
   * **args:** `distance (float)`
   * **default:** `7`
-* **Orientation** — The "direction" two lines will spawn facing each other.
+* **Orientation** — Direction two lines spawn facing each other.
 
   * **args:** `degree (int)` or `NorthSouth | EastWest | SouthNorth | WestEast | Random`
   * **default:** `90` (NorthSouth)
+* **botDefaultAi** — Default AI behaviour assigned to bots that do not specify one inline.
+
+  * **args:** `None`
+  * **default:** `None`
+* **botDefaultDeathPolicy** — Default death policy assigned to bots that do not specify one inline.
+
+  * **args:** `None | Kick | Replace`
+  * **default:** `Kick`
+* **botKickDelay** — Seconds to wait after a bot dies before kicking it (allows the kill to register).
+
+  * **args:** `seconds (float)`
+  * **default:** `2`
+* **botReplaceDelay** — Seconds to wait after kicking a bot before re‑spawning it (clears the slot).
+
+  * **args:** `seconds (float)`
+  * **default:** `0.5`
+* **lineBotCount** — Default number of bots in a `summonLine` or `spawnLine` when count is not specified inline.
+
+  * **args:** `count (int, > 0)`
+  * **default:** `10`
+* **lineSpacing** — Lateral spacing in metres between bots in a line. Set so bots will be shoulder to shoulder.
+
+  * **args:** `metres (float, > 0)`
+  * **default:** `0.55`
 
 ---
 
@@ -209,11 +406,22 @@ All commands must be prefixed with `rc` and require admin.
 
 Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS options in rotation configs.
 
-**Format**: `MDS:<ConfigVariable>:<Argument(s)>`
+**Format:** `MDS:<ConfigVariable>:<Argument(s)>`
 
-Supported variables:
+### General
+
+* **EnableDebugLogging** — `true | false`
+* **EnableAdminOnly** — `true | false`
+
+### Arena
 
 * **SetArena** — `(x,z),(x,z)`
+* **AddArena** — `(x,z),(x,z)`
+* **SetArenaCorner1** — `x,z`
+* **SetArenaCorner2** — `x,z`
+
+### Drill
+
 * **SetXvXDistance** — `distance(float)`
 * **SetXvXSpacing** — `distance(float)`
 * **SetXvXStrategy** — `Random | Next | Any | Repeat`
@@ -224,6 +432,35 @@ Supported variables:
 * **SetOpenMeleeOffset** — `distance(float)`
 * **SetOrientation** — `degree(int)` **or** `NorthSouth | EastWest | SouthNorth | WestEast | Random`
 
+### Bot
+
+* **SetBotDefaultAi** — `None`
+* **SetBotDefaultDeathPolicy** — `None | Kick | Replace`
+* **SetBotKickDelay** — `seconds(float)`
+* **SetBotReplaceDelay** — `seconds(float)`
+
+### Line
+
+* **SetLineBotCount** — `count(int)`
+* **SetLineSpacing** — `metres(float)`
+* **SpawnLine** — `x,z,rotation[,count][,faction][,class][,ai][,death][,name[,regtag[,uniformId]]]`
+
+  Schedules a shoulder‑to‑shoulder bot line to spawn when the round begins. Specify it multiple times for multiple lines (e.g. two opposing lines). Mirrors the `rc spawnLine` grammar, with map‑load defaults instead of a caller:
+  * `x,z,rotation` — required. World position and facing (degrees from North).
+  * `count` — optional. Defaults to `lineBotCount`.
+  * `faction` — optional. `attacking` (default), `defending`, or a faction name (e.g. `French`). `attacking`/`defending` resolve against the live round at spawn time, so the same config works across maps.
+  * `class` — optional. Defaults to `ArmyLineInfantry`.
+  * `ai,death` — optional. Default to `botDefaultAi` / `botDefaultDeathPolicy`.
+  * `name,regtag,uniformId` — optional identity extras.
+
+  *Examples:*
+
+  ```
+  mod_variable_local MDS:SpawnLine:-20,30,90
+  mod_variable_local MDS:SpawnLine:-20,30,90,French
+  mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
+  ```
+
 ---
 
 ## Example Config
@@ -231,6 +468,7 @@ Supported variables:
 ```text
 # Global
 mod_variable MDS:EnableDebugLogging:true
+mod_variable MDS:EnableAdminOnly:true
 
 # Map Rotation (per‑map overrides)
 mod_variable_local MDS:SetArena:(-40.99,42.69),(-3.35,5.38)
@@ -243,6 +481,13 @@ mod_variable_local MDS:SetGroupfightStrategy:Random
 mod_variable_local MDS:SetOpenMeleeSpacing:1.5
 mod_variable_local MDS:SetOpenMeleeOffset:7
 mod_variable_local MDS:SetOrientation:NorthSouth
+
+# Bots
+mod_variable_local MDS:SetBotDefaultDeathPolicy:Replace
+mod_variable_local MDS:SetBotKickDelay:2
+mod_variable_local MDS:SetBotReplaceDelay:0.5
+mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
+mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
 ```
 
 ---
@@ -251,8 +496,8 @@ mod_variable_local MDS:SetOrientation:NorthSouth
 
 * Automatic repeating drills with user customization
 * Modded UI
-* Multi‑arena support
-* Basic bot support
+* Multi-arena support
+* Bot AI (Autostab, Autoblock, 1v1Bot)
 
 ---
 
