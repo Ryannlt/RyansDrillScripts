@@ -27,6 +27,9 @@ namespace MDS.ConsoleCommands
             RegisterCommand(new XvXCommand());
             RegisterCommand(new GroupfightCommand());
             RegisterCommand(new ShootingTrainingCommand());
+            RegisterCommand(new BotCommand());
+            RegisterCommand(new SummonLineCommand());
+            RegisterCommand(new SpawnLineCommand());
 
             Logger.Log($"Registered {commandRegistry.Count} predefined commands.", LogLevel.INFO);
         }

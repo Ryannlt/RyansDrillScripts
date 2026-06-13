@@ -64,8 +64,9 @@ namespace MDS.Systems
 
             NewRoundCleanup();
             ArenaManager.ApplyStagedArenas();
+            LineManager.SpawnStagedLines(); // map-load auto-populate (after BotManager was reset above)
 
-            Logger.Log($"Round {roundId} on {mapName}. Mode: {gameplayMode}, Type: {gameType}. Attacking: {attackingFaction}, Defending: {defendingFaction}.", LogLevel.INFO);
+            Logger.Log($"Round {roundId} on {mapName}. Mode: {gameplayMode}, Type: {gameType}. Attacking: {FactionTokens.DisplayName(attackingFaction)}, Defending: {FactionTokens.DisplayName(defendingFaction)}.", LogLevel.INFO);
         }
 
         private static void NewRoundCleanup()
@@ -84,6 +85,7 @@ namespace MDS.Systems
 
             XvXCommand.Reset();
             GroupfightCommand.Reset();
+            BotManager.Reset();
         }
 
         public static void OnPlayerConnected(int playerId, bool isAutoAdmin, string backendId)
@@ -101,6 +103,7 @@ namespace MDS.Systems
             if (isBot)
             {
                 newPlayer = new Bot(playerId, playerName, regimentTag);
+                BotManager.OnBotJoined(newPlayer);
             }
             else
             {
@@ -127,6 +130,11 @@ namespace MDS.Systems
             _defendingPlayers.Remove(player);
             _spectatorPlayers.Remove(player);
             _connectedPlayers.Remove(playerId);
+
+            if (player.IsBot)
+            {
+                BotManager.OnBotDisconnected(playerId);
+            }
         }
 
         public static void OnPlayerSpawned(int playerId, int spawnSectionId, FactionCountry faction, PlayerClass playerClass, int uniformId, GameObject playerObject)
@@ -162,10 +170,26 @@ namespace MDS.Systems
             }
             else
             {
-                Logger.Log($"Invalid faction {faction} for player {player.PlayerName}.", LogLevel.WARNING);
+                Logger.Log($"Invalid faction {FactionTokens.DisplayName(faction)} for player {player.PlayerName}.", LogLevel.WARNING);
             }
 
             Logger.Log($"Player Spawned: {player}", LogLevel.DEBUG);
+
+            if (player.IsBot)
+            {
+                BotManager.OnBotSpawned(player);
+            }
+        }
+
+        public static void OnPlayerDied(int playerId)
+        {
+            var player = GetPlayerById(playerId);
+            if (player == null) return;
+
+            Logger.Log($"Player {playerId} died.", LogLevel.DEBUG);
+
+            if (player.IsBot)
+                BotManager.OnBotDied(player);
         }
 
         public static void OnPlayerEnterSpectatorMode(int playerId)
