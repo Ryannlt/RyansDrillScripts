@@ -42,7 +42,7 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning bot: {parsed.Spec.Faction}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning bot: {FactionTokens.DisplayName(parsed.Spec.Faction)}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
         }
     }
 }

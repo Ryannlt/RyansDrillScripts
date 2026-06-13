@@ -50,7 +50,7 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Forming line of {count} bot(s): {spec.Spec.Faction}/{spec.Spec.Class}, AI {spec.Ai}, death {spec.Death}.");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Forming line of {count} bot(s): {FactionTokens.DisplayName(spec.Spec.Faction)}/{spec.Spec.Class}, AI {spec.Ai}, death {spec.Death}.");
         }
 
         // Pulls an optional leading positive-int count; defaults to the lineBotCount configurable.
