@@ -48,7 +48,7 @@ namespace MDS.Events
             BotPlacement? placement = parameters[4] as BotPlacement?;
 
             BotManager.SpawnBots(count, spec, ai, death, placement);
-            Logger.Log($"SpawnBotsEvent: {count}x {(spec == null ? "random" : $"{spec.Faction}/{spec.Class}")}, AI {ai}, death {death}.", LogLevel.INFO);
+            Logger.Log($"SpawnBotsEvent: {count}x {(spec == null ? "random" : $"{FactionTokens.DisplayName(spec.Faction)}/{spec.Class}")}, AI {ai}, death {death}.", LogLevel.INFO);
         }
     }
 }

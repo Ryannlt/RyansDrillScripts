@@ -51,7 +51,7 @@ namespace MDS.Systems
                     CarbonPlayerCommands.SpawnSpecific(spec);
             }
 
-            Logger.Log($"Requested {count} bot(s). Spec: {(spec == null ? "random" : $"{spec.Faction}/{spec.Class}")}, AI {ai}, death {death}.", LogLevel.INFO);
+            Logger.Log($"Requested {count} bot(s). Spec: {(spec == null ? "random" : $"{FactionTokens.DisplayName(spec.Faction)}/{spec.Class}")}, AI {ai}, death {death}.", LogLevel.INFO);
         }
 
         // Spawns one bot per placement, all sharing the same spec/ai/death (used by line formations).
@@ -69,7 +69,7 @@ namespace MDS.Systems
                 CarbonPlayerCommands.SpawnSpecific(spec);
             }
 
-            Logger.Log($"Requested {placements.Count} bot(s) in formation. Spec: {spec.Faction}/{spec.Class}, AI {ai}, death {death}.", LogLevel.INFO);
+            Logger.Log($"Requested {placements.Count} bot(s) in formation. Spec: {FactionTokens.DisplayName(spec.Faction)}/{spec.Class}, AI {ai}, death {death}.", LogLevel.INFO);
         }
 
         public static bool SetAi(int playerId, BotAiEnum ai)

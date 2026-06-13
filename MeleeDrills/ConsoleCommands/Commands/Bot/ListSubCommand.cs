@@ -27,7 +27,7 @@ namespace MDS.ConsoleCommands
             CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Tracked bots ({bots.Count}):");
             foreach (var bot in bots)
             {
-                string spec = bot.Spec == null ? "random" : $"{bot.Spec.Faction}/{bot.Spec.Class}";
+                string spec = bot.Spec == null ? "random" : $"{FactionTokens.DisplayName(bot.Spec.Faction)}/{bot.Spec.Class}";
                 string line = $"  id {bot.PlayerId} | {spec} | AI {bot.AiType} | death {bot.DeathPolicy} | {(bot.Initialized ? "spawned" : "pending")}";
                 CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {line}");
             }

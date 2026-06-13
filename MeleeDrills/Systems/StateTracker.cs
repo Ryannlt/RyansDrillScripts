@@ -66,7 +66,7 @@ namespace MDS.Systems
             ArenaManager.ApplyStagedArenas();
             LineManager.SpawnStagedLines(); // map-load auto-populate (after BotManager was reset above)
 
-            Logger.Log($"Round {roundId} on {mapName}. Mode: {gameplayMode}, Type: {gameType}. Attacking: {attackingFaction}, Defending: {defendingFaction}.", LogLevel.INFO);
+            Logger.Log($"Round {roundId} on {mapName}. Mode: {gameplayMode}, Type: {gameType}. Attacking: {FactionTokens.DisplayName(attackingFaction)}, Defending: {FactionTokens.DisplayName(defendingFaction)}.", LogLevel.INFO);
         }
 
         private static void NewRoundCleanup()
@@ -170,7 +170,7 @@ namespace MDS.Systems
             }
             else
             {
-                Logger.Log($"Invalid faction {faction} for player {player.PlayerName}.", LogLevel.WARNING);
+                Logger.Log($"Invalid faction {FactionTokens.DisplayName(faction)} for player {player.PlayerName}.", LogLevel.WARNING);
             }
 
             Logger.Log($"Player Spawned: {player}", LogLevel.DEBUG);

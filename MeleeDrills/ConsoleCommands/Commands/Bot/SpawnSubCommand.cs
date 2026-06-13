@@ -1,5 +1,6 @@
 using MDS.Core;
 using MDS.Events;
+using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
@@ -31,7 +32,7 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Spawning {parsed.Count} bot(s): {parsed.Spec.Faction}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
+            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Spawning {parsed.Count} bot(s): {FactionTokens.DisplayName(parsed.Spec.Faction)}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
         }
     }
 }

@@ -161,7 +161,8 @@ namespace MDS.ConsoleCommands
             }
 
             // optional faction (and optional class). Accepts attacking/defending (resolved now against
-            // the live round, since these are runtime commands) as well as a FactionCountry name.
+            // the live round, since these are runtime commands), a FactionCountry name, or an extension
+            // faction name (e.g. ARBritish).
             if (i < args.Length && FactionTokens.TryResolve(args[i], out FactionCountry faction))
             {
                 p.Faction = faction;

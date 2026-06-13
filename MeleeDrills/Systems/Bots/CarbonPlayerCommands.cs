@@ -6,7 +6,6 @@ using MDS.Core;
 // All bot control funnels through here so the (undocumented) quirks stay quarantined to one file.
 // Commands are issued WITHOUT the 'rc' prefix because CommandExecutor.ExecuteConsoleCommand runs
 // the command that would follow 'rc' (matches existing usage, e.g. ShootingTrainingEvent's "set ...").
-// Reference: https://wiki.holdfastgame.com/Remote_Console_Commands#Bot_Commands
 
 namespace MDS.Systems
 {
@@ -24,8 +23,10 @@ namespace MDS.Systems
             CommandExecutor.ExecuteCommand($"{Prefix} spawn {count}");
         }
 
-        // Spawn one bot with an explicit spec. Faction/Class are required enum NAMES (e.g. French,
-        // ArmyLineInfantry). Optional trailing args are positional, so only appended while contiguous.
+        // Spawn one bot with an explicit spec. Faction/Class serialize via FactionCountry/PlayerClass:
+        // named values send their enum name (e.g. French, ArmyLineInfantry); an extension faction the SDK
+        // enum can't name yet sends its integer (e.g. 11 for ARBritish), which the command accepts.
+        // Optional trailing args are positional, so only appended while contiguous.
         public static void SpawnSpecific(BotSpawnSpec spec)
         {
             string cmd = $"{Prefix} spawnSpecific {spec.Faction} {spec.Class}";
