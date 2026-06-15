@@ -6,23 +6,27 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot move <target> <seek|face|facepoint|stop> [args]
-    //   seek <x> <z>       - walk/run toward a world point, facing the direction of travel
-    //   facepoint <x> <z>  - rotate in place to face a world point
-    //   face <deg>         - rotate in place to a heading (degrees from North)
-    //   stop               - halt movement
-    // Sets a movement order ONLY on bots already running the Manual AI (set via 'rc bot setBotAi <t> Manual').
-    // Bots on any other AI are left untouched - this never reassigns AI. A test harness for movement behaviors.
+    // rc bot move <bots> <behavior> [args]
+    //   seek      <x z | playerId | me>   - run toward a point/player, facing the direction of travel
+    //   arrive    <x z | playerId | me>   - like seek, but decelerate to a smooth stop at the destination
+    //   flee      <x z | playerId | me>   - run directly away from a point/player
+    //   facepoint <x z | playerId | me>   - rotate in place to face a point/player
+    //   face      <deg>                   - rotate in place to a heading (degrees from North)
+    //   stop                              - halt movement
+    // <bots> selects WHICH bots get the order (playerId|all|attacking|defending|faction). A player/me
+    // DESTINATION is tracked live each tick (chase / flee a moving player). Orders only apply to bots
+    // already on the Manual AI ('rc bot setBotAi <bots> Manual'); bots on other AIs are left untouched.
     public class MoveSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Move;
 
+        // Validate has no caller id; 'me' is structurally valid here and resolved to the real caller in Execute.
         public bool Validate(string[] args, out string errorMessage) =>
-            TryParseOrder(args, out _, out errorMessage);
+            TryParseOrder(args, callerId: 0, out _, out errorMessage);
 
         public void Execute(int playerId, string[] args)
         {
-            if (!TryParseOrder(args, out MoveOrder order, out string error))
+            if (!TryParseOrder(args, playerId, out MoveOrder order, out string error))
             {
                 CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");
                 return;
@@ -42,9 +46,9 @@ namespace MDS.ConsoleCommands
         }
 
         private const string Usage =
-            "Usage: rc bot move <target> <seek x z | facepoint x z | face deg | stop>";
+            "Usage: rc bot move <bots> <seek|arrive|flee|facepoint <x z|playerId|me> | face <deg> | stop>";
 
-        private static bool TryParseOrder(string[] args, out MoveOrder order, out string error)
+        private static bool TryParseOrder(string[] args, int callerId, out MoveOrder order, out string error)
         {
             order = default;
             error = string.Empty;
@@ -61,34 +65,77 @@ namespace MDS.ConsoleCommands
             switch (behavior)
             {
                 case "stop":
-                    if (args.Length != 2) { error = "Usage: rc bot move <target> stop"; return false; }
+                    if (args.Length != 2) { error = "Usage: rc bot move <bots> stop"; return false; }
                     order = MoveOrder.Stop();
                     return true;
 
                 case "face":
                     if (args.Length != 3 || !TryFloat(args[2], out float deg))
                     {
-                        error = "Usage: rc bot move <target> face <deg>";
+                        error = "Usage: rc bot move <bots> face <deg>";
                         return false;
                     }
                     order = MoveOrder.Face(deg);
                     return true;
 
                 case "seek":
+                case "arrive":
+                case "flee":
                 case "facepoint":
-                    if (args.Length != 4 || !TryFloat(args[2], out float x) || !TryFloat(args[3], out float z))
-                    {
-                        error = $"Usage: rc bot move <target> {behavior} <x> <z>";
+                    if (!TryParseDestination(args, callerId, out MoveTarget target, out error))
                         return false;
-                    }
-                    Vector2 point = new Vector2(x, z);
-                    order = behavior == "seek" ? MoveOrder.Seek(point) : MoveOrder.FacePoint(point);
+                    order = behavior switch
+                    {
+                        "seek" => MoveOrder.Seek(target),
+                        "arrive" => MoveOrder.Arrive(target),
+                        "flee" => MoveOrder.Flee(target),
+                        _ => MoveOrder.FacePoint(target),
+                    };
                     return true;
 
                 default:
-                    error = $"Unknown behavior '{args[1]}'. Valid: seek, face, facepoint, stop.";
+                    error = $"Unknown behavior '{args[1]}'. Valid: seek, arrive, flee, face, facepoint, stop.";
                     return false;
             }
+        }
+
+        // Destination tokens after the behavior: "x z" (two numbers) | "<playerId>" (one int) | "me" (caller).
+        private static bool TryParseDestination(string[] args, int callerId, out MoveTarget target, out string error)
+        {
+            target = default;
+            error = string.Empty;
+
+            int rem = args.Length - 2; // tokens following the behavior keyword
+            if (rem == 1)
+            {
+                string tok = args[2];
+                if (tok.Equals("me", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    target = MoveTarget.Player(callerId);
+                    return true;
+                }
+                if (int.TryParse(tok, out int id))
+                {
+                    target = MoveTarget.Player(id);
+                    return true;
+                }
+                error = "Destination must be 'x z', a playerId, or 'me'.";
+                return false;
+            }
+
+            if (rem == 2)
+            {
+                if (!TryFloat(args[2], out float x) || !TryFloat(args[3], out float z))
+                {
+                    error = "Destination 'x z' must be two numbers.";
+                    return false;
+                }
+                target = MoveTarget.At(new Vector2(x, z));
+                return true;
+            }
+
+            error = "Usage: rc bot move <bots> <seek|arrive|flee|facepoint> <x z | playerId | me>";
+            return false;
         }
 
         private static bool TryFloat(string s, out float value) =>

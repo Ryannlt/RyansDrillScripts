@@ -30,10 +30,12 @@ namespace MDS.Systems
         }
 
         // The heading (degrees from North, in [0, 360)) that points from 'from' toward 'to'.
-        public static float HeadingTo(Vector2 from, Vector2 to)
+        public static float HeadingTo(Vector2 from, Vector2 to) => HeadingOf(to - from);
+
+        // The heading (degrees from North, in [0, 360)) a direction vector points in.
+        public static float HeadingOf(Vector2 dir)
         {
-            Vector2 d = to - from;
-            float deg = Mathf.Atan2(d.x, d.y) * Mathf.Rad2Deg; // x first: 0 = North (+Z), 90 = East (+X)
+            float deg = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg; // x first: 0 = North (+Z), 90 = East (+X)
             return deg < 0f ? deg + 360f : deg;
         }
     }
