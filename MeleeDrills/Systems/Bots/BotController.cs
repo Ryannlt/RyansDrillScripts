@@ -10,6 +10,7 @@ namespace MDS.Systems
         public IPlayer Bot { get; }
         public int PlayerId => Bot.PlayerId;
         public BotAiEnum AiType => _ai.AiType;
+        public IBotAi Ai => _ai;                          // current AI instance (debug/manual control hooks)
         public BotSpawnSpec Spec { get; }                 // null for randomly-spawned bots
         public BotDeathPolicy DeathPolicy { get; private set; }
         public bool Initialized { get; private set; }
@@ -79,8 +80,20 @@ namespace MDS.Systems
         // Live facing (degrees from North) via the spawn GameObject, or null if not currently spawned.
         public float? Heading => Bot.PlayerObject != null ? Bot.PlayerObject.transform.eulerAngles.y : (float?)null;
 
+        // Live planar pose (world XZ + heading) for movement behaviors; false if not currently spawned.
+        public bool TryGetPose(out BotPose pose)
+        {
+            pose = default;
+            if (Position == null || Heading == null) return false;
+
+            Vector3 p = Position.Value;
+            pose = new BotPose(new Vector2(p.x, p.z), Heading.Value);
+            return true;
+        }
+
         // A bot the game accepted (joined) but never actually spawned never becomes Initialized. After a
         // timeout such a bot is a "ghost" - tracked by us but not present in the world - and is dropped.
+        // A note that I have no idea why this happens still...
         public bool IsUnspawnedGhost(float now, float timeoutSeconds) =>
             !Initialized && (now - _trackedAt) > timeoutSeconds;
 

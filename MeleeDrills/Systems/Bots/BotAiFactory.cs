@@ -14,6 +14,7 @@ namespace MDS.Systems
         static BotAiFactory()
         {
             Register(BotAiEnum.None, () => new NoneAi());
+            Register(BotAiEnum.Manual, () => new ManualAi());
 
             Logger.Log($"Registered {_factories.Count} bot AI type(s).", LogLevel.INFO);
         }
