@@ -9,7 +9,8 @@ namespace MDS.ConsoleCommands
         SetBotAi,
         SetBotDeathPolicy,
         Remove,
-        List
+        List,
+        Move
         // Add more bot subcommands here as needed
     }
 }

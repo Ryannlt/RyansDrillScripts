@@ -43,6 +43,7 @@ namespace MDS.ConsoleCommands
             Register(new SetBotDeathPolicySubCommand());
             Register(new RemoveSubCommand());
             Register(new ListSubCommand());
+            Register(new MoveSubCommand());
 
             Logger.Log($"Total bot sub-commands registered: {registry.Count}", LogLevel.INFO);
         }
