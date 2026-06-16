@@ -23,7 +23,9 @@ namespace MDS.Systems
         // Default Wander tuning. Offset > radius keeps the wander target always ahead (no spin-in-place).
         public const float DefaultWanderOffset = 2f;    // how far ahead the wander circle projects (m)
         public const float DefaultWanderRadius = 1.2f;  // wander circle radius (m); larger = sharper turns
-        public const float DefaultWanderRate = 90f;     // max heading drift (deg/sec random walk)
+        public const float DefaultWanderRate = 90f;     // jitter applied to the wander angle (deg/sec)
+        public const float DefaultWanderDecay = 1.5f;   // pull of the wander angle back toward straight-ahead (1/sec)
+        private const float MaxWanderAngle = 60f;       // hard clamp on the wander angle (deg)
 
         // Seek: move toward a world point at full throttle, facing the direction of travel (coupled). Halts
         // once arrived. Faithful to Millington's kinematic seek (velocity straight at the target).
@@ -77,11 +79,16 @@ namespace MDS.Systems
         // caller owns 'wanderAngle' (passed by ref) so it persists across ticks - the first behavior that
         // needs memory. Uses UnityEngine.Random, so unlike the others it is not deterministic.
         public static BotIntent Wander(BotPose pose, ref float wanderAngle, float deltaTime) =>
-            Wander(pose, ref wanderAngle, DefaultWanderOffset, DefaultWanderRadius, DefaultWanderRate, deltaTime);
+            Wander(pose, ref wanderAngle, DefaultWanderOffset, DefaultWanderRadius, DefaultWanderRate, DefaultWanderDecay, deltaTime);
 
-        public static BotIntent Wander(BotPose pose, ref float wanderAngle, float offset, float radius, float rate, float deltaTime)
+        public static BotIntent Wander(BotPose pose, ref float wanderAngle, float offset, float radius, float rate, float decay, float deltaTime)
         {
-            wanderAngle += RandomBinomial() * rate * deltaTime; // framerate-scaled random walk
+            // Random-walk the wander angle, but pull it back toward 0 (straight ahead) each tick. An
+            // unbounded walk parks off-centre and the bot circles forever; this restoring force keeps the
+            // angle hovering around forward so the path meanders instead. Clamp is a hard safety cap.
+            wanderAngle += RandomBinomial() * rate * deltaTime;
+            wanderAngle -= wanderAngle * decay * deltaTime;
+            wanderAngle = Mathf.Clamp(wanderAngle, -MaxWanderAngle, MaxWanderAngle);
 
             Vector2 forward = MovementSolver.DirectionFromHeading(pose.Heading);
             Vector2 circleCenter = pose.Position + forward * offset;
