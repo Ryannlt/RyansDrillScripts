@@ -7,15 +7,17 @@ using MDS.Systems;
 namespace MDS.ConsoleCommands
 {
     // rc bot move <bots> <behavior> [args]
-    //   seek      <x z | playerId | me>   - run toward a point/player, facing the direction of travel
-    //   arrive    <x z | playerId | me>   - like seek, but decelerate to a smooth stop at the destination
-    //   flee      <x z | playerId | me>   - run directly away from a point/player
-    //   facepoint <x z | playerId | me>   - rotate in place to face a point/player
+    //   seek      <dest> [facing <dest>]  - run toward a point/player; optionally face a SEPARATE target
+    //   arrive    <dest> [facing <dest>]  - like seek, but decelerate to a smooth stop at the destination
+    //   flee      <dest> [facing <dest>]  - run directly away; e.g. 'flee me facing me' = backpedal
+    //   facepoint <dest>                  - rotate in place to face a point/player
     //   face      <deg>                   - rotate in place to a heading (degrees from North)
+    //   wander                            - roam continuously with gentle random turns
     //   stop                              - halt movement
-    // <bots> selects WHICH bots get the order (playerId|all|attacking|defending|faction). A player/me
-    // DESTINATION is tracked live each tick (chase / flee a moving player). Orders only apply to bots
-    // already on the Manual AI ('rc bot setBotAi <bots> Manual'); bots on other AIs are left untouched.
+    // <dest> = 'x z' | <playerId> | me. A player/me dest is tracked live each tick (chase/flee/face a
+    // moving player). The optional 'facing <dest>' DECOUPLES facing from travel (default: face travel).
+    // <bots> selects WHICH bots get the order (playerId|all|attacking|defending|faction). Orders only apply
+    // to bots already on the Manual AI ('rc bot setBotAi <bots> Manual'); bots on other AIs are untouched.
     public class MoveSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Move;
@@ -46,7 +48,8 @@ namespace MDS.ConsoleCommands
         }
 
         private const string Usage =
-            "Usage: rc bot move <bots> <seek|arrive|flee|facepoint <x z|playerId|me> | face <deg> | stop>";
+            "Usage: rc bot move <bots> <behavior>. Behaviors: seek/arrive/flee <dest> [facing <dest>], " +
+            "facepoint <dest>, face <deg>, wander, stop. dest = 'x z' | playerId | me.";
 
         private static bool TryParseOrder(string[] args, int callerId, out MoveOrder order, out string error)
         {
@@ -69,6 +72,11 @@ namespace MDS.ConsoleCommands
                     order = MoveOrder.Stop();
                     return true;
 
+                case "wander":
+                    if (args.Length != 2) { error = "Usage: rc bot move <bots> wander"; return false; }
+                    order = MoveOrder.Wander();
+                    return true;
+
                 case "face":
                     if (args.Length != 3 || !TryFloat(args[2], out float deg))
                     {
@@ -78,37 +86,57 @@ namespace MDS.ConsoleCommands
                     order = MoveOrder.Face(deg);
                     return true;
 
+                case "facepoint":
+                    if (!TryParseTargetTokens(args[2..], callerId, out MoveTarget facePoint, out error))
+                        return false;
+                    order = MoveOrder.FacePoint(facePoint);
+                    return true;
+
                 case "seek":
                 case "arrive":
                 case "flee":
-                case "facepoint":
-                    if (!TryParseDestination(args, callerId, out MoveTarget target, out error))
+                {
+                    string[] tail = args[2..];
+                    string[] destTokens = tail;
+                    MoveTarget? facing = null;
+
+                    int fi = IndexOfFacing(tail);
+                    if (fi >= 0)
+                    {
+                        destTokens = tail[..fi];
+                        if (!TryParseTargetTokens(tail[(fi + 1)..], callerId, out MoveTarget f, out error))
+                            return false;
+                        facing = f;
+                    }
+
+                    if (!TryParseTargetTokens(destTokens, callerId, out MoveTarget dest, out error))
                         return false;
+
                     order = behavior switch
                     {
-                        "seek" => MoveOrder.Seek(target),
-                        "arrive" => MoveOrder.Arrive(target),
-                        "flee" => MoveOrder.Flee(target),
-                        _ => MoveOrder.FacePoint(target),
+                        "seek" => MoveOrder.Seek(dest),
+                        "arrive" => MoveOrder.Arrive(dest),
+                        _ => MoveOrder.Flee(dest),
                     };
+                    order.FaceTarget = facing;
                     return true;
+                }
 
                 default:
-                    error = $"Unknown behavior '{args[1]}'. Valid: seek, arrive, flee, face, facepoint, stop.";
+                    error = $"Unknown behavior '{args[1]}'. Valid: seek, arrive, flee, face, facepoint, wander, stop.";
                     return false;
             }
         }
 
-        // Destination tokens after the behavior: "x z" (two numbers) | "<playerId>" (one int) | "me" (caller).
-        private static bool TryParseDestination(string[] args, int callerId, out MoveTarget target, out string error)
+        // Parses a destination token slice: "x z" (two numbers) | "<playerId>" (one int) | "me" (caller).
+        private static bool TryParseTargetTokens(string[] tokens, int callerId, out MoveTarget target, out string error)
         {
             target = default;
             error = string.Empty;
 
-            int rem = args.Length - 2; // tokens following the behavior keyword
-            if (rem == 1)
+            if (tokens.Length == 1)
             {
-                string tok = args[2];
+                string tok = tokens[0];
                 if (tok.Equals("me", System.StringComparison.OrdinalIgnoreCase))
                 {
                     target = MoveTarget.Player(callerId);
@@ -123,9 +151,9 @@ namespace MDS.ConsoleCommands
                 return false;
             }
 
-            if (rem == 2)
+            if (tokens.Length == 2)
             {
-                if (!TryFloat(args[2], out float x) || !TryFloat(args[3], out float z))
+                if (!TryFloat(tokens[0], out float x) || !TryFloat(tokens[1], out float z))
                 {
                     error = "Destination 'x z' must be two numbers.";
                     return false;
@@ -134,8 +162,17 @@ namespace MDS.ConsoleCommands
                 return true;
             }
 
-            error = "Usage: rc bot move <bots> <seek|arrive|flee|facepoint> <x z | playerId | me>";
+            error = Usage;
             return false;
+        }
+
+        // Index of the "facing" keyword in the token slice, or -1 if absent.
+        private static int IndexOfFacing(string[] tokens)
+        {
+            for (int i = 0; i < tokens.Length; i++)
+                if (tokens[i].Equals("facing", System.StringComparison.OrdinalIgnoreCase))
+                    return i;
+            return -1;
         }
 
         private static bool TryFloat(string s, out float value) =>

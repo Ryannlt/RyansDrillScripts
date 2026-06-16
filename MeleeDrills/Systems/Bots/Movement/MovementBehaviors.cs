@@ -17,8 +17,13 @@ namespace MDS.Systems
         private const float ArriveEpsilonSqr = 0.0001f;
 
         // Default Arrive radii: start slowing within SlowRadius, fully halt within ArriveRadius (metres).
-        public const float DefaultSlowRadius = 3f;
-        public const float DefaultArriveRadius = 0.3f;
+        public const float DefaultSlowRadius = 1f;
+        public const float DefaultArriveRadius = 0.1f;
+
+        // Default Wander tuning. Offset > radius keeps the wander target always ahead (no spin-in-place).
+        public const float DefaultWanderOffset = 2f;    // how far ahead the wander circle projects (m)
+        public const float DefaultWanderRadius = 1.2f;  // wander circle radius (m); larger = sharper turns
+        public const float DefaultWanderRate = 90f;     // max heading drift (deg/sec random walk)
 
         // Seek: move toward a world point at full throttle, facing the direction of travel (coupled). Halts
         // once arrived. Faithful to Millington's kinematic seek (velocity straight at the target).
@@ -65,6 +70,29 @@ namespace MDS.Systems
             Vector2 axis = MovementSolver.ToLocalAxis(pose, dir, 1f);
             return new BotIntent { MoveAxis = axis, LookHeading = MovementSolver.HeadingOf(dir) };
         }
+
+        // Wander: smooth, undirected roaming (Millington's steering wander). A target rides the rim of a
+        // circle projected ahead of the bot; that rim point drifts by a small random amount each tick and
+        // the bot Seeks it - producing gentle continuous turns rather than jittery noise. STATEFUL: the
+        // caller owns 'wanderAngle' (passed by ref) so it persists across ticks - the first behavior that
+        // needs memory. Uses UnityEngine.Random, so unlike the others it is not deterministic.
+        public static BotIntent Wander(BotPose pose, ref float wanderAngle, float deltaTime) =>
+            Wander(pose, ref wanderAngle, DefaultWanderOffset, DefaultWanderRadius, DefaultWanderRate, deltaTime);
+
+        public static BotIntent Wander(BotPose pose, ref float wanderAngle, float offset, float radius, float rate, float deltaTime)
+        {
+            wanderAngle += RandomBinomial() * rate * deltaTime; // framerate-scaled random walk
+
+            Vector2 forward = MovementSolver.DirectionFromHeading(pose.Heading);
+            Vector2 circleCenter = pose.Position + forward * offset;
+            Vector2 rim = MovementSolver.DirectionFromHeading(pose.Heading + wanderAngle);
+            Vector2 target = circleCenter + rim * radius;
+
+            return Seek(pose, target); // faces + moves toward the wandering target (offset > radius => always ahead)
+        }
+
+        // Triangular random in [-1, 1], biased toward 0 (Millington's randomBinomial).
+        private static float RandomBinomial() => Random.value - Random.value;
 
         // Rotate in place to face a world point (no translation).
         public static BotIntent FacePoint(BotPose pose, Vector2 target)
