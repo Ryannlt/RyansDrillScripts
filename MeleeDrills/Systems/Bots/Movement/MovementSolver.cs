@@ -38,5 +38,12 @@ namespace MDS.Systems
             float deg = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg; // x first: 0 = North (+Z), 90 = East (+X)
             return deg < 0f ? deg + 360f : deg;
         }
+
+        // The unit world direction (XZ) a heading points in. Inverse of HeadingOf.
+        public static Vector2 DirectionFromHeading(float heading)
+        {
+            float hr = heading * Mathf.Deg2Rad;
+            return new Vector2(Mathf.Sin(hr), Mathf.Cos(hr));
+        }
     }
 }
