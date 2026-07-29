@@ -3,9 +3,9 @@ using MDS.Systems;
 namespace MDS.Events
 {
     // Applies a MoveOrder to tracked bots matching a target token, but ONLY to bots already on Manual AI.
-    // Bots on any other AI (e.g. None) are left untouched - this never reassigns AI. Per-tick execution of
-    // the order happens in ManualAi.Decide -> BotIntent; this event only delivers the order and sets the
-    // run mode once (run is a sticky toggle, not a per-tick channel).
+    // Bots on any other AI (e.g. None) are left untouched - this never reassigns AI. All execution - movement
+    // AND establishing the sticky run mode - happens in ManualAi.Decide -> BotIntent; this event only
+    // delivers the order (so run survives a Replace, which never routes through here).
     // Parameters: (string target, MoveOrder order)
     public class SetBotMoveOrderEvent : IEvent
     {
@@ -43,9 +43,7 @@ namespace MDS.Events
                 BotController controller = FindController(id);
                 if (controller?.Ai is ManualAi manual)
                 {
-                    manual.SetOrder(order);
-                    // Run is a sticky mode - set once here, not every tick. Translating orders run.
-                    CarbonPlayerCommands.SetRunning(id, order.IsTranslating);
+                    manual.SetOrder(order); // ManualAi establishes the run mode itself on its next tick
                     applied++;
                 }
                 else

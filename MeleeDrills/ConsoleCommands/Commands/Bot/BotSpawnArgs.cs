@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HoldfastSharedMethods;
 using MDS.ConfigVariables;
 using MDS.Core;
@@ -30,6 +31,37 @@ namespace MDS.ConsoleCommands
         // allowCount: spawn accepts a leading count; summon does not (it's always a single bot).
         public static bool ValidateShape(string[] args, bool allowCount, out string error) =>
             ParseTokens(args, allowCount, out _, out error);
+
+        // Pulls an optional 'at <playerId>' pair out of the args so a summon can be placed at ANOTHER
+        // player's position instead of the caller's, and returns the remaining args for the normal
+        // positional parse. Keyword-based (like the 'facing'/'separate' flags on 'bot move') because a bare
+        // trailing int would be ambiguous with summonLine's leading [count]. May appear anywhere in the args.
+        public static bool StripAtTarget(string[] args, out string[] rest, out int? targetPlayerId, out string error)
+        {
+            rest = args;
+            targetPlayerId = null;
+            error = string.Empty;
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (!args[i].Equals("at", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (i + 1 >= args.Length || !int.TryParse(args[i + 1], out int id))
+                {
+                    error = "Invalid 'at' target. Usage: at <playerId>.";
+                    return false;
+                }
+
+                targetPlayerId = id;
+
+                var remaining = new List<string>(args);
+                remaining.RemoveRange(i, 2);
+                rest = remaining.ToArray();
+                return true;
+            }
+
+            return true;
+        }
 
         // Map-load line resolution (no caller). count/faction/class are all optional, with LINE defaults:
         //   count   => lineBotCount configurable
@@ -237,8 +269,8 @@ namespace MDS.ConsoleCommands
                     return false;
                 }
 
-                name = args[i++];
-                if (i < args.Length) regTag = args[i++];
+                name = DecodeSpaces(args[i++]);
+                if (i < args.Length) regTag = DecodeSpaces(args[i++]);
                 if (i < args.Length)
                 {
                     if (!int.TryParse(args[i], out int uid))
@@ -258,6 +290,18 @@ namespace MDS.ConsoleCommands
 
             return true;
         }
+
+        // Bot names/regtags are single positional args, so a literal space would be split by BOTH our parser
+        // and the game's spawnSpecific command. To allow spaces, type SpacePlaceholder ('_') where you want
+        // one; it is swapped for U+2002 EN SPACE - a Unicode space that renders normally in-game but is NOT
+        // the ASCII space (U+0020) either parser splits on. Any stray ASCII space (only the comma-delimited
+        // SpawnLine config var could smuggle one into a name) is converted too. U+2002 is the char Commander
+        // Battles used and is confirmed to display; change SpaceChar for a different width.
+        private const char SpacePlaceholder = '_';
+        private const char SpaceChar = '\u2002';   // EN SPACE (U+2002)
+
+        private static string DecodeSpaces(string token) =>
+            token?.Replace(SpacePlaceholder, SpaceChar).Replace(' ', SpaceChar);
 
         private struct Parsed
         {

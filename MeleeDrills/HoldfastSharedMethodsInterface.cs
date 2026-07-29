@@ -105,6 +105,12 @@ namespace MDS
                 shipID,
                 swimming
             );
+
+            if (isServer)
+            {
+                MeleeProbe.OnPacket(playerId, actionCollection, ownerRotationY, ownerYaw);
+                CombatTracker.OnPacket(playerId, actionCollection);
+            }
         }
 
         public void OnStartSpectate(int playerId, int spectatedPlayerId)
@@ -131,7 +137,10 @@ namespace MDS
 
         public void OnPlayerHurt(int playerId, byte oldHp, byte newHp, EntityHealthChangedReason reason)
         {
-            if (isServer && newHp == 0)
+            if (!isServer) return;
+
+            MeleeProbe.OnHurt(playerId, oldHp, newHp);
+            if (newHp == 0)
                 StateTracker.OnPlayerDied(playerId);
         }
 
@@ -151,7 +160,10 @@ namespace MDS
 
         public void OnPlayerShoot(int playerId, bool dryShot) { }
 
-        public void OnPlayerBlock(int attackingPlayerId, int defendingPlayerId) { }
+        public void OnPlayerBlock(int attackingPlayerId, int defendingPlayerId)
+        {
+            if (isServer) CombatTracker.OnBlock(attackingPlayerId, defendingPlayerId);
+        }
 
         public void OnPlayerMeleeStartSecondaryAttack(int playerId) { }
 

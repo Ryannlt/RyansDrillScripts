@@ -9,5 +9,8 @@ namespace MDS.Systems
         {
             return BotIntent.Idle;
         }
+
+        // Nothing to carry across a Replace - this AI holds no instruction.
+        public void InheritFrom(IBotAi previous) { }
     }
 }

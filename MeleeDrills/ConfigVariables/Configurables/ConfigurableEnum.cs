@@ -22,6 +22,7 @@ namespace MDS.ConfigVariables
         BotDefaultDeathPolicy,
         BotKickDelay,
         BotReplaceDelay,
+        GlobalAi,
         LineBotCount,
         LineSpacing
     }

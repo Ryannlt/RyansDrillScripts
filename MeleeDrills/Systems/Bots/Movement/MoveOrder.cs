@@ -2,7 +2,7 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    public enum MoveOrderKind { Stop, Seek, Arrive, Flee, Face, FacePoint, Wander }
+    public enum MoveOrderKind { Stop, Seek, Arrive, Flee, Pursue, Evade, Face, FacePoint, Wander }
 
     // A destination for a point-based movement order: either a fixed world point, or a player resolved to
     // its LIVE position each tick (so a bot can chase / flee / track a moving player). Resolving a player
@@ -18,26 +18,31 @@ namespace MDS.Systems
     }
 
     // A single movement instruction for the Manual test AI. Carries whichever payload its Kind needs
-    // (Target for Seek/Arrive/Flee/FacePoint, Heading for Face). Built by 'rc bot move' and ticked by
-    // ManualAi into a BotIntent via MovementBehaviors.
+    // (Target for Seek/Arrive/Flee/Pursue/Evade/FacePoint, Heading for Face). Built by 'rc bot move' and
+    // ticked by ManualAi into a BotIntent via MovementBehaviors.
     public struct MoveOrder
     {
         public MoveOrderKind Kind;
-        public MoveTarget Target;        // Seek / Arrive / Flee / FacePoint
+        public MoveTarget Target;        // Seek / Arrive / Flee / Pursue / Evade / FacePoint
         public float Heading;            // Face: degrees from North
-        public MoveTarget? FaceTarget;   // optional decoupled facing for Seek/Arrive/Flee (null => face travel)
+        public MoveTarget? FaceTarget;   // optional decoupled facing for translating orders (null => face travel)
+        public bool Separate;            // blend in Separation (spread apart from nearby bots)
+        public bool Avoid;               // blend in Obstacle Avoidance (steer around walls)
+        public bool Dodge;               // blend in Collision Avoidance (steer around moving agents)
 
         public static MoveOrder Stop() => new MoveOrder { Kind = MoveOrderKind.Stop };
         public static MoveOrder Seek(MoveTarget target) => new MoveOrder { Kind = MoveOrderKind.Seek, Target = target };
         public static MoveOrder Arrive(MoveTarget target) => new MoveOrder { Kind = MoveOrderKind.Arrive, Target = target };
         public static MoveOrder Flee(MoveTarget target) => new MoveOrder { Kind = MoveOrderKind.Flee, Target = target };
+        public static MoveOrder Pursue(MoveTarget target) => new MoveOrder { Kind = MoveOrderKind.Pursue, Target = target };
+        public static MoveOrder Evade(MoveTarget target) => new MoveOrder { Kind = MoveOrderKind.Evade, Target = target };
         public static MoveOrder FacePoint(MoveTarget target) => new MoveOrder { Kind = MoveOrderKind.FacePoint, Target = target };
         public static MoveOrder Face(float heading) => new MoveOrder { Kind = MoveOrderKind.Face, Heading = heading };
         public static MoveOrder Wander() => new MoveOrder { Kind = MoveOrderKind.Wander };
 
         // Whether carrying out this order involves translation (so the actuator should enable running).
         public bool IsTranslating =>
-            Kind == MoveOrderKind.Seek || Kind == MoveOrderKind.Arrive ||
-            Kind == MoveOrderKind.Flee || Kind == MoveOrderKind.Wander;
+            Kind == MoveOrderKind.Seek || Kind == MoveOrderKind.Arrive || Kind == MoveOrderKind.Flee ||
+            Kind == MoveOrderKind.Pursue || Kind == MoveOrderKind.Evade || Kind == MoveOrderKind.Wander;
     }
 }

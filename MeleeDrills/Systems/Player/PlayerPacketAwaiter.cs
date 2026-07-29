@@ -14,6 +14,11 @@ namespace MDS.Systems
             _awaiters[playerId] = callback;
         }
 
+        // Drops a pending wait. Needed because a player who sends NO packets (e.g. while free-flying) would
+        // otherwise leave the callback queued indefinitely, firing much later when they next send one.
+        // Safe to call when nothing is pending.
+        public static bool CancelWait(int playerId) => _awaiters.Remove(playerId);
+
         public static void HandlePlayerPacket(
             int playerId,
             Vector3? ownerPosition,
