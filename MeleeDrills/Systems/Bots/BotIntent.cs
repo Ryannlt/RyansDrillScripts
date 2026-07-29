@@ -10,7 +10,10 @@ namespace MDS.Systems
         public float? LookHeading;   // degrees from North
         public bool? Running;        // toggle run
 
-        // (Phase 1+: a melee/action channel will be added here.)
+        // The action channel: a single carbonPlayers 'playerAction' token to issue this tick (null = none),
+        // e.g. a melee windup/strike/block. Actions are edge-triggered, so a brain emits one only on the tick
+        // it wants it - held states (like a block) are started once and stopped later, not re-sent each tick.
+        public string Action;
 
         public static BotIntent Idle => new BotIntent();
     }

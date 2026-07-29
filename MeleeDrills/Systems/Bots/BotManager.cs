@@ -36,10 +36,12 @@ namespace MDS.Systems
         // ---- Command surface ----
 
         // spec == null => fully random spawn (carbonPlayers spawn). placement positions/faces each bot on spawn.
-        public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        // predecessor is supplied only by the Replace path, so the replacement can resume the dead bot's
+        // standing order (see IBotAi.InheritFrom); every other caller leaves it null.
+        public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor = null)
         {
             for (int i = 0; i < count; i++)
-                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement });
+                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement, Predecessor = predecessor });
 
             if (spec == null)
             {
@@ -119,7 +121,14 @@ namespace MDS.Systems
                 ? _pending.Dequeue()
                 : new PendingBotSpawn { Spec = null, Ai = DefaultAi, Death = DefaultDeathPolicy, Placement = null };
 
-            _bots.Add(new BotController(bot, BotAiFactory.Create(p.Ai), p.Spec, p.Death, p.Placement));
+            IBotAi ai = BotAiFactory.Create(p.Ai);
+
+            // A Replace replacement resumes the standing order of the bot it replaces; without this it would
+            // come back identical in every respect except that it had forgotten what it was doing.
+            if (p.Predecessor != null)
+                ai.InheritFrom(p.Predecessor);
+
+            _bots.Add(new BotController(bot, ai, p.Spec, p.Death, p.Placement));
             Logger.Log($"Bot {bot.PlayerId} tracked (AI {p.Ai}, death {p.Death}). Active bots: {_bots.Count}.", LogLevel.INFO);
 
             EnsureTicking();
@@ -145,6 +154,7 @@ namespace MDS.Systems
             float? deathHeading = controller.Heading;
             BotSpawnSpec spec = BuildReplacementSpec(controller);
             BotAiEnum ai = controller.AiType;
+            IBotAi predecessorAi = controller.Ai;   // Replace: lets the replacement resume its standing order
 
             switch (policy)
             {
@@ -173,7 +183,7 @@ namespace MDS.Systems
                     }
 
                     Logger.Log($"Bot {bot.PlayerId} died (policy: Replace). Kicking in {KickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
-                    ScheduleDeathKick(bot.PlayerId, spec, ai, policy, new BotPlacement(deathPos.Value, deathHeading));
+                    ScheduleDeathKick(bot.PlayerId, spec, ai, policy, new BotPlacement(deathPos.Value, deathHeading), predecessorAi);
                     break;
             }
         }
@@ -188,6 +198,9 @@ namespace MDS.Systems
         {
             _bots.Clear();
             _pending.Clear();
+            CharacterTracker.Reset();
+            MeleeProbe.Reset();
+            CombatTracker.Reset();
             StopTicking();
             Logger.Log("BotManager reset.", LogLevel.DEBUG);
         }
@@ -206,20 +219,20 @@ namespace MDS.Systems
         // A death-triggered kick is delayed so the game can credit the killer and play the death before
         // the bot is removed (an immediate kick makes the bot vanish without crediting the kill).
         // A non-null replacementSpec (+ position) spawns a replacement once the kick fires (Replace).
-        private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor = null)
         {
             if (!UnityEngine.Application.isPlaying)
             {
                 // Edit-mode (tests): no coroutine host / no real game - do it synchronously, no delays.
                 KickBot(playerId);
-                SpawnReplacement(replacementSpec, ai, death, placement);
+                SpawnReplacement(replacementSpec, ai, death, placement, predecessor);
                 return;
             }
 
-            MonoBehaviourRunner.Instance.StartCoroutine(DeathKickRoutine(playerId, replacementSpec, ai, death, placement));
+            MonoBehaviourRunner.Instance.StartCoroutine(DeathKickRoutine(playerId, replacementSpec, ai, death, placement, predecessor));
         }
 
-        private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor)
         {
             // 1) Wait so the killer is credited and the death plays out before the bot is removed.
             yield return new WaitForSeconds(KickDelaySeconds);
@@ -228,7 +241,7 @@ namespace MDS.Systems
             // 2) Spawn the replacement only AFTER a short gap, so the kick fully frees the bot slot
             //    first (kicking and respawning back-to-back can make the spawnSpecific fail).
             yield return new WaitForSeconds(ReplaceDelaySeconds);
-            SpawnReplacement(replacementSpec, ai, death, placement);
+            SpawnReplacement(replacementSpec, ai, death, placement, predecessor);
         }
 
         private static void KickBot(int playerId)
@@ -239,10 +252,10 @@ namespace MDS.Systems
             Logger.Log($"Bot {playerId} kicked; replacement (if any) in {ReplaceDelaySeconds}s.", LogLevel.DEBUG);
         }
 
-        private static void SpawnReplacement(BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        private static void SpawnReplacement(BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor)
         {
             if (replacementSpec != null && placement.HasValue)
-                SpawnBots(1, replacementSpec, ai, death, placement);
+                SpawnBots(1, replacementSpec, ai, death, placement, predecessor);
         }
 
         // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills
@@ -285,6 +298,10 @@ namespace MDS.Systems
             {
                 float now = Time.realtimeSinceStartup;
 
+                // One shared snapshot of all spawned players/bots per tick, so neighbour-aware steering
+                // (separation, collision avoidance) sees everyone without an O(n) gather per bot.
+                CharacterTracker.Refresh(TickInterval);
+
                 foreach (var bot in _bots.ToList())
                 {
                     // Self-heal: a replacement that joined but never spawned (game rejected it, e.g. a
@@ -311,6 +328,7 @@ namespace MDS.Systems
             public BotAiEnum Ai;
             public BotDeathPolicy Death;
             public BotPlacement? Placement;
+            public IBotAi Predecessor;   // Replace only: AI of the bot being replaced, for InheritFrom
         }
     }
 }

@@ -44,6 +44,9 @@ namespace MDS.ConsoleCommands
             Register(new RemoveSubCommand());
             Register(new ListSubCommand());
             Register(new MoveSubCommand());
+            Register(new ProbeSubCommand());
+            Register(new ActSubCommand());
+            Register(new CfgSubCommand());
 
             Logger.Log($"Total bot sub-commands registered: {registry.Count}", LogLevel.INFO);
         }

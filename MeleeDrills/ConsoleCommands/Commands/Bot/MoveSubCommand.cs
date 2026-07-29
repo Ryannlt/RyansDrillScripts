@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 using MDS.Core;
@@ -7,15 +8,18 @@ using MDS.Systems;
 namespace MDS.ConsoleCommands
 {
     // rc bot move <bots> <behavior> [args]
-    //   seek      <dest> [facing <dest>]  - run toward a point/player; optionally face a SEPARATE target
-    //   arrive    <dest> [facing <dest>]  - like seek, but decelerate to a smooth stop at the destination
-    //   flee      <dest> [facing <dest>]  - run directly away; e.g. 'flee me facing me' = backpedal
-    //   facepoint <dest>                  - rotate in place to face a point/player
-    //   face      <deg>                   - rotate in place to a heading (degrees from North)
-    //   wander                            - roam continuously with gentle random turns
-    //   stop                              - halt movement
-    // <dest> = 'x z' | <playerId> | me. A player/me dest is tracked live each tick (chase/flee/face a
-    // moving player). The optional 'facing <dest>' DECOUPLES facing from travel (default: face travel).
+    //   seek      <dest> [facing <dest>] [flags]  - run toward a point/player
+    //   arrive    <dest> [facing <dest>] [flags]  - like seek, but decelerate to a smooth stop
+    //   flee      <dest> [facing <dest>] [flags]  - run directly away; e.g. 'flee me facing me' = backpedal
+    //   pursue    <dest> [facing <dest>] [flags]  - lead a moving target to intercept it (predictive seek)
+    //   evade     <dest> [facing <dest>] [flags]  - flee from where a target is heading (predictive flee)
+    //   wander    [flags]                         - roam continuously with gentle random turns
+    //   facepoint <dest>                          - rotate in place to face a point/player
+    //   face      <deg>                           - rotate in place to a heading (degrees from North)
+    //   stop                                      - halt movement
+    // <dest> = 'x z' | <playerId> | me (a player/me dest is tracked live). [flags] are blended corrective
+    // steering, any combination: 'separate' (spread apart from bots), 'avoid' (steer around walls),
+    // 'dodge' (steer around moving agents). Optional 'facing <dest>' DECOUPLES facing from travel.
     // <bots> selects WHICH bots get the order (playerId|all|attacking|defending|faction). Orders only apply
     // to bots already on the Manual AI ('rc bot setBotAi <bots> Manual'); bots on other AIs are untouched.
     public class MoveSubCommand : IBotSubCommand
@@ -48,8 +52,8 @@ namespace MDS.ConsoleCommands
         }
 
         private const string Usage =
-            "Usage: rc bot move <bots> <behavior>. Behaviors: seek/arrive/flee <dest> [facing <dest>], " +
-            "facepoint <dest>, face <deg>, wander, stop. dest = 'x z' | playerId | me.";
+            "Usage: rc bot move <bots> <behavior>. Behaviors: seek/arrive/flee/pursue/evade <dest> [facing <dest>] [flags], " +
+            "wander [flags], facepoint <dest>, face <deg>, stop. dest = 'x z' | playerId | me. flags = separate | avoid | dodge.";
 
         private static bool TryParseOrder(string[] args, int callerId, out MoveOrder order, out string error)
         {
@@ -73,9 +77,18 @@ namespace MDS.ConsoleCommands
                     return true;
 
                 case "wander":
-                    if (args.Length != 2) { error = "Usage: rc bot move <bots> wander"; return false; }
+                {
+                    string[] tail = args[2..];
+                    bool wSeparate = StripFlag(ref tail, "separate");
+                    bool wAvoid = StripFlag(ref tail, "avoid");
+                    bool wDodge = StripFlag(ref tail, "dodge");
+                    if (tail.Length != 0) { error = "Usage: rc bot move <bots> wander [separate] [avoid] [dodge]"; return false; }
                     order = MoveOrder.Wander();
+                    order.Separate = wSeparate;
+                    order.Avoid = wAvoid;
+                    order.Dodge = wDodge;
                     return true;
+                }
 
                 case "face":
                     if (args.Length != 3 || !TryFloat(args[2], out float deg))
@@ -95,8 +108,13 @@ namespace MDS.ConsoleCommands
                 case "seek":
                 case "arrive":
                 case "flee":
+                case "pursue":
+                case "evade":
                 {
                     string[] tail = args[2..];
+                    bool separate = StripFlag(ref tail, "separate");
+                    bool avoid = StripFlag(ref tail, "avoid");
+                    bool dodge = StripFlag(ref tail, "dodge");
                     string[] destTokens = tail;
                     MoveTarget? facing = null;
 
@@ -116,14 +134,19 @@ namespace MDS.ConsoleCommands
                     {
                         "seek" => MoveOrder.Seek(dest),
                         "arrive" => MoveOrder.Arrive(dest),
-                        _ => MoveOrder.Flee(dest),
+                        "flee" => MoveOrder.Flee(dest),
+                        "pursue" => MoveOrder.Pursue(dest),
+                        _ => MoveOrder.Evade(dest),
                     };
                     order.FaceTarget = facing;
+                    order.Separate = separate;
+                    order.Avoid = avoid;
+                    order.Dodge = dodge;
                     return true;
                 }
 
                 default:
-                    error = $"Unknown behavior '{args[1]}'. Valid: seek, arrive, flee, face, facepoint, wander, stop.";
+                    error = $"Unknown behavior '{args[1]}'. Valid: seek, arrive, flee, pursue, evade, face, facepoint, wander, stop.";
                     return false;
             }
         }
@@ -173,6 +196,23 @@ namespace MDS.ConsoleCommands
                 if (tokens[i].Equals("facing", System.StringComparison.OrdinalIgnoreCase))
                     return i;
             return -1;
+        }
+
+        // Removes the first occurrence of a bare flag keyword (case-insensitive) from the token slice,
+        // returning whether it was present. Lets 'separate' appear anywhere in the tail.
+        private static bool StripFlag(ref string[] tokens, string flag)
+        {
+            for (int i = 0; i < tokens.Length; i++)
+            {
+                if (tokens[i].Equals(flag, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    var remaining = new List<string>(tokens);
+                    remaining.RemoveAt(i);
+                    tokens = remaining.ToArray();
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static bool TryFloat(string s, out float value) =>

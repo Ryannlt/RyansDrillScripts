@@ -107,6 +107,9 @@ namespace MDS.Systems
 
             if (intent.Running.HasValue)
                 CarbonPlayerCommands.SetRunning(PlayerId, intent.Running.Value);
+
+            if (!string.IsNullOrEmpty(intent.Action))
+                CarbonPlayerCommands.PerformAction(PlayerId, intent.Action);
         }
     }
 }

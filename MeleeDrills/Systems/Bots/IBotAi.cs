@@ -10,5 +10,12 @@ namespace MDS.Systems
         // Decide what the bot should do this tick. 'self' exposes the bot's identity/position;
         // implementations may also read StateTracker for targets. deltaTime is seconds since last tick.
         BotIntent Decide(BotController self, float deltaTime);
+
+        // Called on a Replace-policy replacement, with the AI of the bot it replaces, so a STANDING
+        // instruction (e.g. a move order) survives the death instead of the replacement standing inert.
+        // Carry only that: TRANSIENT state (remembered positions, velocity estimates, wander drift) must be
+        // left fresh, because the replacement is a new body at the death position and stale values would
+        // produce a bogus first tick. 'previous' may be a different AI type - check before casting.
+        void InheritFrom(IBotAi previous);
     }
 }

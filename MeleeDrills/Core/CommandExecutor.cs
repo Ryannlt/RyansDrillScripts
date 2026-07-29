@@ -22,7 +22,10 @@ namespace MDS.Core
             Debug.Log("[MDS] Console found.");
         }
 
-        public static void ExecuteCommand(string command)
+        // logResult=false marks a HIGH-FREQUENCY command (the per-tick bot input channels, which fire for
+        // every bot every tick and would otherwise bury the debug log). Failures and exceptions are still
+        // reported either way, so a genuinely broken command never goes silent.
+        public static void ExecuteCommand(string command, bool logResult = true)
         {
             if (_gameMethods == null)
             {
@@ -37,6 +40,8 @@ namespace MDS.Core
                 Logger.Log($"Failed to execute command '{command}': {exception}", LogLevel.ERROR);
                 return;
             }
+
+            if (!logResult && success) return;
 
             // DEBUG-only so it's silent in normal play; shows whether each command (e.g. spawnSpecific)
             // succeeded, what the game returned, and - via the log timestamp - when.

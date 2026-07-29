@@ -30,6 +30,9 @@ rc openmelee 2 7
 ```
 rc bot spawn 5 French ArmyLineInfantry
 rc bot summon French ArmyLineInfantry None Replace
+rc bot setBotAi all MeleeFight
+rc bot cfg 42 stabInterval 2.5
+rc bot move all seek me
 rc bot remove all
 rc summonLine 10 French ArmyLineInfantry
 rc spawnLine -20 30 90 10 French ArmyLineInfantry
@@ -42,6 +45,8 @@ rc get xvxDistance
 rc get Players all
 rc set xvxDistance 5
 rc set lineBotCount 10
+rc set globalAI MeleeDummy stabInterval 2.5
+rc get globalAI MeleeDummy stabInterval
 ```
 
 ---
@@ -141,8 +146,9 @@ All commands must be prefixed with `rc` and require admin.
 **Usage:** `rc bot <subcommand> [args]`
 
 * Central command for spawning, summoning, and managing bots.
-* Subcommands: `spawn`, `spawnRandom`, `summon`, `setBotAi`, `setBotDeathPolicy`, `remove`, `list`
-* See **[Bot Subcommands](#bot-subcommands)** section for full details.
+* Subcommands: `spawn`, `spawnRandom`, `summon`, `setBotAi`, `setBotDeathPolicy`, `remove`, `list`, `move`, `cfg`
+* Dev/probe tools: `probe`, `act`
+* See **[Bot Subcommands](#bot-subcommands)** for full details and **[Bot AI Types](#bot-ai-types)** for the available AI behaviours.
 * **Examples:**
 
   ```
@@ -272,13 +278,13 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 * Sets the AI behaviour for one or more tracked bots immediately.
 * **Target:** `all`, `attacking`, `defending`, `<faction>` (e.g. `French`), or `<playerId>`
-* **AI types:** `None` *(New AI types yet to be added)*
+* **AI types:** `None`, `Manual`, `MeleeDefend`, `MeleeFight`, `MeleeDummy` — see **[Bot AI Types](#bot-ai-types)**.
 * **Examples:**
 
   ```
-  rc bot setBotAi all None
-  rc bot setBotAi French None
-  rc bot setBotAi 42 None
+  rc bot setBotAi all MeleeFight
+  rc bot setBotAi French MeleeDefend
+  rc bot setBotAi 42 MeleeDummy
   ```
 
 ### `setBotDeathPolicy`
@@ -324,6 +330,100 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
   ```
   rc bot list
   ```
+
+### `move`
+
+**Usage:** `rc bot move <target> <behavior> [args]`
+
+* Drives bots that are on the **`Manual`** AI (set it first with `rc bot setBotAi <target> Manual`). Bots on other AIs are left untouched.
+* **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
+* **Behaviors:**
+  * `seek <dest>` — run toward a point/player
+  * `arrive <dest>` — like seek, but decelerate to a smooth stop
+  * `flee <dest>` — run directly away (`flee me facing me` = backpedal toward you)
+  * `pursue <dest>` — lead a moving target to intercept it (predictive seek)
+  * `evade <dest>` — flee from where a target is heading (predictive flee)
+  * `wander` — roam continuously with gentle random turns
+  * `facepoint <dest>` — rotate in place to face a point/player
+  * `face <deg>` — rotate in place to a heading (degrees from North)
+  * `stop` — halt movement
+* **`<dest>`** = `x z` (two numbers) | `<playerId>` | `me`. A player/`me` destination is tracked **live** as they move.
+* **Flags** (any combination, appended anywhere): `separate` (spread apart from other bots), `avoid` (steer around walls), `dodge` (steer around moving agents).
+* **`facing <dest>`** — optional; decouples which way the bot faces from the way it travels.
+* **Examples:**
+
+  ```
+  rc bot setBotAi all Manual
+  rc bot move all seek me
+  rc bot move all arrive 12 -4 facing me avoid
+  rc bot move 42 flee me facing me
+  rc bot move all wander separate
+  ```
+
+### `cfg`
+
+**Usage:** `rc bot cfg <target> [<lever> <value>]`
+
+* Sets or lists **per-bot AI levers** — a granular override for one bot/group on top of the global default. Only affects bots whose AI is configurable (currently `MeleeDummy`); others are skipped with a message.
+* **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
+* With `<lever> <value>` — set that lever on the matching bots.
+* Without a lever — list the matching bots' current levers and values.
+* A lever's default comes from `globalAI` — see **[Bot AI Types](#bot-ai-types)**.
+* **Examples:**
+
+  ```
+  rc bot cfg 42 stabInterval 2.5
+  rc bot cfg all stabDirection High
+  rc bot cfg 42
+  ```
+
+### `probe` & `act` *(dev tools)*
+
+Diagnostic helpers used while building and validating AI behaviour — no effect on normal drills.
+
+* **`rc bot probe <playerId|me> [on|off]`** — logs a player's melee packet actions and hurt events to the server log (to learn the input tokens and timings). Toggles if `on|off` is omitted. Works on any player, human or bot.
+* **`rc bot act <playerId> <actionToken> [argument]`** — fires a single raw `carbonPlayers` playerAction at a player/bot (e.g. `MeleeBlockHigh`, `MeleeStrikeHigh`, `ExecuteMeleeWeaponStrike`). No AI required.
+
+---
+
+## Bot AI Types
+
+Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot summon <faction> <class> <ai>`), or via the `botDefaultAi` default.
+
+| AI | Behaviour |
+| --- | --- |
+| `None` | Does nothing — stands where it spawned. |
+| `Manual` | Manually driven with `rc bot move` (a movement test harness: seek, arrive, flee, pursue, evade, wander, face…). Issues no orders on its own. |
+| `MeleeDefend` | Defensive melee — faces the nearest enemy and reactively blocks its attacks (mirrors left/right, matches high/low) while holding a defensive distance. |
+| `MeleeFight` | Offensive melee — everything `MeleeDefend` does, plus a riposte stab during the enemy's recovery window, and closes into the player's face. |
+| `MeleeDummy` | Static training dummy — stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking/attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
+
+### Configurable AI levers
+
+Some AIs expose named **levers** you can tune. A lever's value resolves in three layers:
+
+> **built-in default ← global default (settable) ← per-bot override (settable)**
+
+* **Per-bot override** — `rc bot cfg <target> <lever> <value>` (that bot/group only). List with `rc bot cfg <target>`.
+* **Global default** — `rc set globalAI <AiType> <lever> <value>`; new bots of that AI start from it. Read with `rc get globalAI <AiType> <lever>`, and persist it in a rotation config with the `SetGlobalAi` config variable.
+
+Changing a global default affects **newly created** bots of that AI, not ones already spawned.
+
+**`MeleeDummy` levers**
+
+| Lever | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `stabInterval` | float > 0 (seconds) | `1.7` | Delay between stabs. |
+| `stabDirection` | `Random` / `High` / `Low` / `Alternate` | `Random` | Which way each stab is thrown (e.g. `High` to drill high blocks). |
+
+*Example — a slow, high-only dummy:*
+
+```
+rc bot summon Defending ArmyLineInfantry
+rc bot setBotAi <id> MeleeDummy
+rc bot cfg <id> stabInterval 3
+rc bot cfg <id> stabDirection High
+```
 
 ---
 
@@ -377,7 +477,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
   * **default:** `90` (NorthSouth)
 * **botDefaultAi** — Default AI behaviour assigned to bots that do not specify one inline.
 
-  * **args:** `None`
+  * **args:** `None | Manual | MeleeDefend | MeleeFight | MeleeDummy` (see [Bot AI Types](#bot-ai-types))
   * **default:** `None`
 * **botDefaultDeathPolicy** — Default death policy assigned to bots that do not specify one inline.
 
@@ -391,6 +491,11 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
   * **args:** `seconds (float)`
   * **default:** `0.5`
+* **globalAI** — Global **default** value for a configurable AI lever (per-bot overrides are the separate `rc bot cfg` command). Reads/writes one lever at a time. See [Configurable AI levers](#configurable-ai-levers).
+
+  * **set args:** `<AiType> <lever> <value>` — e.g. `rc set globalAI MeleeDummy stabInterval 2.5`
+  * **get args:** `<AiType> <lever>` — e.g. `rc get globalAI MeleeDummy stabInterval`
+  * **default:** each AI's built-in lever values (e.g. `MeleeDummy stabInterval` = `1.7`)
 * **lineBotCount** — Default number of bots in a `summonLine` or `spawnLine` when count is not specified inline.
 
   * **args:** `count (int, > 0)`
@@ -434,10 +539,20 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 ### Bot
 
-* **SetBotDefaultAi** — `None`
+* **SetBotDefaultAi** — `None | Manual | MeleeDefend | MeleeFight | MeleeDummy`
 * **SetBotDefaultDeathPolicy** — `None | Kick | Replace`
 * **SetBotKickDelay** — `seconds(float)`
 * **SetBotReplaceDelay** — `seconds(float)`
+* **SetGlobalAi** — `<AiType>,<lever>,<value>`
+
+  Sets a global **default** for one configurable AI lever at map load — the persistent form of `rc set globalAI`. Repeat it for each lever. Per-bot `rc bot cfg` still overrides. (Spaces also work in place of commas.)
+
+  *Examples:*
+
+  ```
+  mod_variable_local MDS:SetGlobalAi:MeleeDummy,stabInterval,2.5
+  mod_variable_local MDS:SetGlobalAi:MeleeDummy,stabDirection,High
+  ```
 
 ### Line
 
@@ -483,9 +598,11 @@ mod_variable_local MDS:SetOpenMeleeOffset:7
 mod_variable_local MDS:SetOrientation:NorthSouth
 
 # Bots
+mod_variable_local MDS:SetBotDefaultAi:MeleeFight
 mod_variable_local MDS:SetBotDefaultDeathPolicy:Replace
 mod_variable_local MDS:SetBotKickDelay:2
 mod_variable_local MDS:SetBotReplaceDelay:0.5
+mod_variable_local MDS:SetGlobalAi:MeleeDummy,stabInterval,2.5
 mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
 mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
 ```
@@ -497,7 +614,8 @@ mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Re
 * Automatic repeating drills with user customization
 * Modded UI
 * Multi-arena support
-* Bot AI (Autostab, Autoblock, 1v1Bot)
+* More melee AI depth (feints, spins, advanced movement) and difficulty scaling
+* Configurable levers for the combat AIs (`MeleeDefend` / `MeleeFight`), AI presets, and target control
 
 ---
 

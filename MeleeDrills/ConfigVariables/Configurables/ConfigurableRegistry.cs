@@ -63,6 +63,7 @@ namespace MDS.ConfigVariables
             RegisterConfigurable(new BotDefaultDeathConfigurable());
             RegisterConfigurable(new BotKickDelayConfigurable());
             RegisterConfigurable(new BotReplaceDelayConfigurable());
+            RegisterConfigurable(new GlobalAiConfigurable());
             RegisterConfigurable(new LineBotCountConfigurable());
             RegisterConfigurable(new LineSpacingConfigurable());
 
