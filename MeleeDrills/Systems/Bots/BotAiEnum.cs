@@ -7,7 +7,8 @@ namespace MDS.Systems
         Manual,      // Manually driven via 'rc bot move' - test harness for movement behaviors.
         MeleeDefend, // Melee combat, defensive: faces the nearest enemy and reactively blocks its attacks.
         MeleeFight,  // Melee combat, offensive: MeleeDefend plus a riposte during the enemy's recovery.
-        MeleeDummy   // Static training dummy: stands facing one way and stabs on a cadence (practice target).
-        // Phase 1+: Facing, ...
+        MeleeDummy,  // Static training dummy: stands facing one way and stabs on a cadence (practice target).
+        Sparring     // Melee combat, reactive: stands its ground, blocks, and only counters once provoked.
+        // MeleeDefend/MeleeFight/Sparring are all MeleeAi presets (capability-toggle bundles); see MeleeAi.
     }
 }

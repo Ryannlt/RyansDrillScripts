@@ -364,7 +364,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 **Usage:** `rc bot cfg <target> [<lever> <value>]`
 
-* Sets or lists **per-bot AI levers** — a granular override for one bot/group on top of the global default. Only affects bots whose AI is configurable (currently `MeleeDummy`); others are skipped with a message.
+* Sets or lists **per-bot AI levers** — a granular override for one bot/group on top of the global default. Only affects bots whose AI is configurable (`MeleeDummy`, and the melee AIs `MeleeDefend` / `MeleeFight` / `Sparring`); others are skipped with a message.
 * **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
 * With `<lever> <value>` — set that lever on the matching bots.
 * Without a lever — list the matching bots' current levers and values.
@@ -396,7 +396,10 @@ Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot 
 | `Manual` | Manually driven with `rc bot move` (a movement test harness: seek, arrive, flee, pursue, evade, wander, face…). Issues no orders on its own. |
 | `MeleeDefend` | Defensive melee — faces the nearest enemy and reactively blocks its attacks (mirrors left/right, matches high/low) while holding a defensive distance. |
 | `MeleeFight` | Offensive melee — everything `MeleeDefend` does, plus a riposte stab during the enemy's recovery window, and closes into the player's face. |
+| `Sparring` | Reactive melee — stands its ground, blocks, and only **counters once provoked** (never throws first). A patient sparring partner: walk up and attack it, it blocks and ripostes. |
 | `MeleeDummy` | Static training dummy — stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking/attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
+
+`MeleeDefend`, `MeleeFight`, and `Sparring` are three **presets of one configurable melee AI** — the same behaviour with different capability toggles (`press` / `riposte` / `move`) and tuning. Tweak any of them per bot with `rc bot cfg` (see below).
 
 ### Configurable AI levers
 
@@ -423,6 +426,43 @@ rc bot summon Defending ArmyLineInfantry
 rc bot setBotAi <id> MeleeDummy
 rc bot cfg <id> stabInterval 3
 rc bot cfg <id> stabDirection High
+```
+
+**`MeleeDefend` / `MeleeFight` / `Sparring` levers**
+
+All three are presets of one melee AI and share the same levers. They differ only in the defaults of the three **toggles**:
+
+| Toggle | `MeleeFight` | `MeleeDefend` | `Sparring` | Meaning |
+| --- | --- | --- | --- | --- |
+| `press` | `on` | `off` | `off` | Throw the first blow when the enemy isn't threatening. |
+| `riposte` | `on` | `off` | `on` | Counter after the guard absorbs a hit. |
+| `move` | `on` | `on` | `off` | Hold/adjust melee spacing vs. stand its ground. |
+
+The **tuning levers** below share the same defaults across all three presets (`seconds ≥ 0` or `metres`, floats):
+
+| Lever | Default | Meaning |
+| --- | --- | --- |
+| `blockReactionMin` | `0` | Min delay between reading an attack and raising the guard. `0` = instant/superhuman. **Main difficulty knob.** |
+| `blockReactionMax` | `0` | Max of that delay (each block picks a random value in the min–max range). |
+| `riposteReactionMin` | `0` | Min delay between a block landing and the counter. |
+| `riposteReactionMax` | `0.1` | Max of that delay. |
+| `riposteWindow` | `0.6` | How long the post-block counter stays available (seconds). |
+| `offensiveRange` | `0.7` | Close spacing it presses to (metres). |
+| `offensiveRangeVariance` | `0.1` | Random jitter added on top of `offensiveRange`. |
+| `defensiveRange` | `2.3` | Reading spacing it guards from (metres). |
+| `defensiveRangeVariance` | `0.4` | Random jitter added on top of `defensiveRange`. |
+| `attackRange` | `1.7` | How close before it commits a stab (metres). |
+| `attackReadBeat` | `0.6` | Extra randomised beat added to the attack cooldown (seconds; pacing). |
+| `aimOffset` | `0.3` | Sideways aim shift while striking, to centre a right-hand stab (metres; negative flips the side, larger = less accurate). |
+
+Reaction levers default to instant (`0`) to keep the tuned feel — raise `blockReaction` for an easier, more beatable bot.
+
+*Example — an easier `MeleeFight` bot that takes ~0.25–0.4s to block:*
+
+```
+rc bot summon Defending ArmyLineInfantry MeleeFight
+rc bot cfg <id> blockReactionMin 0.25
+rc bot cfg <id> blockReactionMax 0.4
 ```
 
 ---
@@ -477,7 +517,7 @@ rc bot cfg <id> stabDirection High
   * **default:** `90` (NorthSouth)
 * **botDefaultAi** — Default AI behaviour assigned to bots that do not specify one inline.
 
-  * **args:** `None | Manual | MeleeDefend | MeleeFight | MeleeDummy` (see [Bot AI Types](#bot-ai-types))
+  * **args:** `None | Manual | MeleeDefend | MeleeFight | Sparring | MeleeDummy` (see [Bot AI Types](#bot-ai-types))
   * **default:** `None`
 * **botDefaultDeathPolicy** — Default death policy assigned to bots that do not specify one inline.
 
@@ -539,7 +579,7 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 ### Bot
 
-* **SetBotDefaultAi** — `None | Manual | MeleeDefend | MeleeFight | MeleeDummy`
+* **SetBotDefaultAi** — `None | Manual | MeleeDefend | MeleeFight | Sparring | MeleeDummy`
 * **SetBotDefaultDeathPolicy** — `None | Kick | Replace`
 * **SetBotKickDelay** — `seconds(float)`
 * **SetBotReplaceDelay** — `seconds(float)`
