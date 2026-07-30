@@ -186,6 +186,8 @@ namespace MDS.Systems
             var player = GetPlayerById(playerId);
             if (player == null) return;
 
+            player.MarkDead(); // the corpse's PlayerObject lingers, so flag death explicitly (bot AIs skip the dead)
+
             Logger.Log($"Player {playerId} died.", LogLevel.DEBUG);
 
             if (player.IsBot)

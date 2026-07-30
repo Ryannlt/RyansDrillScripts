@@ -16,6 +16,7 @@ namespace MDS.Systems
         public PlayerClass? PlayerClass { get; private set; }
         public int? UniformId { get; private set; }
         public GameObject PlayerObject { get; private set; }
+        public bool IsAlive { get; private set; }
 
         public Bot(int playerId, string playerName, string regimentTag)
         {
@@ -31,7 +32,10 @@ namespace MDS.Systems
             PlayerClass = playerClass;
             UniformId = uniformId;
             PlayerObject = playerObject;
+            IsAlive = true;
         }
+
+        public void MarkDead() => IsAlive = false;
 
         public override string ToString()
         {

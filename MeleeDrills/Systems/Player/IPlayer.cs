@@ -14,7 +14,9 @@ namespace MDS.Systems
         FactionCountry? Faction { get; }
         PlayerClass? PlayerClass { get; }
         int? UniformId { get; }
+        bool IsAlive { get; } // spawned and not yet dead; a corpse (PlayerObject still present) is NOT alive
 
         void AssignSpawnDetails(int spawnSectionId, FactionCountry faction, PlayerClass playerClass, int uniformId, GameObject playerObject);
+        void MarkDead(); // clear IsAlive on death (StateTracker.OnPlayerDied)
     }
 }
