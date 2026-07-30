@@ -2,10 +2,10 @@ using MDS.Systems;
 
 namespace MDS.Events
 {
-    // Applies a MoveOrder to tracked bots matching a target token, but ONLY to bots already on Manual AI.
-    // Bots on any other AI (e.g. None) are left untouched - this never reassigns AI. All execution - movement
-    // AND establishing the sticky run mode - happens in ManualAi.Decide -> BotIntent; this event only
-    // delivers the order (so run survives a Replace, which never routes through here).
+    // Applies a MoveOrder to tracked bots matching a target token, but only to bots already on Manual AI. Bots on
+    // any other AI are left untouched; this never reassigns AI. All execution, both the movement and establishing
+    // the sticky run mode, happens in ManualAi.Decide; this event only delivers the order, so run survives a
+    // Replace, which never routes through here.
     // Parameters: (string target, MoveOrder order)
     public class SetBotMoveOrderEvent : IEvent
     {

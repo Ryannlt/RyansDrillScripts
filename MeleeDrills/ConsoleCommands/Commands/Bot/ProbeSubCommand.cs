@@ -4,8 +4,8 @@ using MDS.Systems;
 namespace MDS.ConsoleCommands
 {
     // rc bot probe <playerId|me> [on|off]
-    // Dev tool: logs the target player's melee packet actions + hurt events to the server log so we can learn
-    // the PlayerActions vocabulary + timings. Probes ANY player (human or bot); 'me' = the caller. With no
+    // Dev tool: logs the target player's melee packet actions and hurt events to the server log so we can learn
+    // the PlayerActions vocabulary and timings. Probes any player, human or bot; 'me' is the caller. With no
     // on/off it toggles. No gameplay effect. See MeleeProbe.
     public class ProbeSubCommand : IBotSubCommand
     {

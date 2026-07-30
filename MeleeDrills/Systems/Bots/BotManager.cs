@@ -5,10 +5,10 @@ using UnityEngine;
 using MDS.ConfigVariables;
 using MDS.Core;
 
-// Central bot subsystem: spawns/tracks bots, assigns AI + death policy, and runs a single tick
-// coroutine that lives only while >=1 bot is active. Bots are dropped each new round (mirrors
-// StateTracker) and auto-clear on map change via assembly reload. Lifecycle hooks are called by
-// StateTracker. The COMMAND layer resolves caller context; this layer takes explicit data only.
+// Central bot subsystem: spawns and tracks bots, assigns AI and death policy, and runs a single tick
+// coroutine that lives only while at least one bot is active. Bots are dropped each new round (mirroring
+// StateTracker) and auto-clear on map change via assembly reload. Lifecycle hooks are called by StateTracker.
+// The command layer resolves caller context; this layer takes explicit data only.
 
 namespace MDS.Systems
 {
@@ -33,9 +33,9 @@ namespace MDS.Systems
 
         public static IReadOnlyList<BotController> Bots => _bots;
 
-        // ---- Command surface ----
+        // Command surface.
 
-        // spec == null => fully random spawn (carbonPlayers spawn). placement positions/faces each bot on spawn.
+        // spec null means a fully random spawn (carbonPlayers spawn). placement positions and faces each bot on spawn.
         // predecessor is supplied only by the Replace path, so the replacement can resume the dead bot's
         // standing order (see IBotAi.InheritFrom); every other caller leaves it null.
         public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor = null)
@@ -111,7 +111,7 @@ namespace MDS.Systems
             StopTicking();
         }
 
-        // ---- Lifecycle hooks (called by StateTracker) ----
+        // Lifecycle hooks (called by StateTracker).
 
         public static void OnBotJoined(IPlayer bot)
         {
@@ -205,7 +205,7 @@ namespace MDS.Systems
             Logger.Log("BotManager reset.", LogLevel.DEBUG);
         }
 
-        // ---- Internals ----
+        // Internals.
 
         private static void Untrack(int playerId)
         {
@@ -238,7 +238,7 @@ namespace MDS.Systems
             yield return new WaitForSeconds(KickDelaySeconds);
             KickBot(playerId);
 
-            // 2) Spawn the replacement only AFTER a short gap, so the kick fully frees the bot slot
+            // 2) Spawn the replacement only after a short gap, so the kick fully frees the bot slot
             //    first (kicking and respawning back-to-back can make the spawnSpecific fail).
             yield return new WaitForSeconds(ReplaceDelaySeconds);
             SpawnReplacement(replacementSpec, ai, death, placement, predecessor);
@@ -258,10 +258,10 @@ namespace MDS.Systems
                 SpawnBots(1, replacementSpec, ai, death, placement, predecessor);
         }
 
-        // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills
-        // in the bot's ACTUAL name/regtag/uniformId. The game assigns those randomly when unspecified,
-        // so reusing the real values makes the replacement match the bot it replaces. Returns null for
-        // random-spawned bots (which have no spec to replay).
+        // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills in the bot's
+        // actual name/regtag/uniformId. The game assigns those randomly when unspecified, so reusing the real
+        // values makes the replacement match the bot it replaces. Returns null for random-spawned bots (which
+        // have no spec to replay).
         private static BotSpawnSpec BuildReplacementSpec(BotController controller)
         {
             var spec = controller.Spec;

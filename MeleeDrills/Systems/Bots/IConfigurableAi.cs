@@ -2,10 +2,10 @@ using System.Collections.Generic;
 
 namespace MDS.Systems
 {
-    // An IBotAi that exposes tunable "levers" by name, so a bot's behavior can be dialed in granularly rather
-    // than via preset packages. Set per-bot with 'rc bot cfg <id> <lever> <value>'; the default for a lever
-    // comes from GlobalAiConfigurable ('rc set globalAI <AiType> <lever> <value>'). Values are STRINGS the AI
-    // parses itself, so a lever can be a float, an enum, whatever. See MeleeDummy for the first implementation.
+    // An IBotAi that exposes tunable "levers" by name, so a bot's behaviour can be dialled in per lever rather
+    // than only through preset packages. Set them per bot with 'rc bot cfg <id> <lever> <value>'; a lever's
+    // default comes from GlobalAiConfigurable. Values are strings the AI parses itself, so a lever can be a
+    // float, an enum, or anything else. See MeleeDummy for the first implementation.
     public interface IConfigurableAi
     {
         // Set one lever. Returns false with an error for an unknown name or an invalid value, and leaves the

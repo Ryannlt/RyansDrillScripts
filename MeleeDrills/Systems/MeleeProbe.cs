@@ -4,15 +4,15 @@ using HoldfastSharedMethods;
 
 namespace MDS.Systems
 {
-    // Dev / instrumentation tool (no gameplay effect). Logs a chosen player's melee-relevant packet signals
-    // so we can learn the exact PlayerActions vocabulary and timings BEFORE coding the block FSM - which
-    // tokens mean attack high/low/left/right vs. block, and the lead time from a windup to the hit and the
-    // recovery window after. Toggle with 'rc bot probe <id|me>'.
+    // Dev and instrumentation tool with no gameplay effect. Logs a chosen player's melee-relevant packet signals
+    // so we could learn the exact PlayerActions vocabulary and timings before coding the block logic: which tokens
+    // mean attack high/low/left/right versus block, the lead time from a windup to the hit, and the recovery
+    // window after. Toggle it with 'rc bot probe <id|me>'.
     //
-    // To keep the log readable it prints a player's actions ONLY when the set changes (with a monotonic
-    // timestamp + delta since the last change), so the stream reads as a clean windup -> release -> hurt ->
-    // recovery timeline. Probe BOTH fighters at once (it holds a set) to interleave attacker + victim.
-    // OnPacket fires for every player every packet, so it fast-exits when nothing is being probed.
+    // To keep the log readable it prints a player's actions only when the set changes, with a monotonic timestamp
+    // and the delta since the last change, so the stream reads as a clean windup, release, hurt, recovery
+    // timeline. Probe both fighters at once (it holds a set) to interleave attacker and victim. OnPacket fires for
+    // every player every packet, so it fast-exits when nothing is being probed.
     public static class MeleeProbe
     {
         private static readonly HashSet<int> _probed = new();
@@ -58,7 +58,7 @@ namespace MDS.Systems
             Logger.Log($"MeleeProbe[{playerId}] t={now:F2} (+{delta:F2}s) actions=[{current}] rotY={Fmt(rotationY)} yaw={Fmt(yaw)}", LogLevel.INFO);
         }
 
-        // Called for every hurt event; logs when a PROBED player takes damage (measures hit timing / blocks).
+        // Called for every hurt event; logs when a probed player takes damage, to measure hit timing and blocks.
         public static void OnHurt(int victimId, byte oldHp, byte newHp)
         {
             if (_probed.Count == 0 || !_probed.Contains(victimId)) return;

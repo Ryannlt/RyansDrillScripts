@@ -5,16 +5,14 @@ using MDS.ConfigVariables;
 namespace MDS.Systems
 {
     // The StabbingDummy AI: a static training dummy that stands where it spawned, keeps its spawn facing, and
-    // throws a stab on a steady cadence for a player to walk up to and practice blocking/attacking against. No
-    // perception, targeting, or movement - the opposite of MeleeAi. Set with 'rc bot setBotAi <id> StabbingDummy';
-    // aim it by facing the way you want when you summon it. (The class stays MeleeDummy; the AI name is StabbingDummy.)
+    // throws a stab on a steady cadence for a player to walk up to and practise blocking against. It has no
+    // perception, targeting, or movement, unlike MeleeAi. Set it with 'rc bot setBotAi <id> StabbingDummy' and aim
+    // it by facing the way you want when you summon it. The class is named MeleeDummy; the AI name is StabbingDummy.
     //
-    // First CONFIGURABLE ai: its two levers (stabInterval, stabDirection) are settable per-bot with
-    // 'rc bot cfg <id> <lever> <value>', defaulting from GlobalAiConfigurable ('rc set globalAI StabbingDummy <lever> ...').
-    //
-    // Reuses the confirmed strike mechanics (single MeleeStrike self-holds the windup, one ExecuteMeleeWeaponStrike
-    // releases it cleanly, and a committed stab occupies ~1.5s before it can throw again) with its own tiny loop,
-    // so the working combat AI (MeleeAi) is left untouched.
+    // Its two levers (stabInterval, stabDirection) are settable per bot with 'rc bot cfg', defaulting from
+    // GlobalAiConfigurable. It reuses the same strike mechanic as MeleeAi (one MeleeStrike holds the windup, one
+    // ExecuteMeleeWeaponStrike releases it cleanly, and a committed stab takes about 1.5s before it can throw
+    // again) with its own small loop, so the combat AI is left untouched.
     public class MeleeDummy : IBotAi, IConfigurableAi
     {
         public enum StabDirection { Random, High, Low, Alternate }
@@ -22,17 +20,17 @@ namespace MDS.Systems
         private const float WindupSeconds = 0.15f;   // hold the windup this long (one MeleeStrike) before releasing
         private const float FirstStabDelay = 1.0f;   // settle after spawning before the first stab
 
-        // Built-in lever defaults (name -> value), the single source for these values: the constructor uses them
-        // as its fallback, and GlobalAiConfigurable seeds its global defaults from here so
-        // 'rc get globalAI StabbingDummy <lever>' reports a real value instead of "not set".
+        // Built-in lever defaults, the single source for these values. The constructor uses them as its fallback,
+        // and GlobalAiConfigurable seeds its global defaults from here so 'rc get globalAI StabbingDummy <lever>'
+        // reports a real value instead of "not set".
         public static readonly (string name, string value)[] DefaultLevers =
         {
-            ("stabInterval", "1.7"),    // release -> next windup, seconds (>~1.5s stab recovery + a beat)
+            ("stabInterval", "1.7"),    // seconds from release to the next windup, above the ~1.5s stab recovery
             ("stabDirection", "Random"),
         };
 
         // Tunable levers (see IConfigurableAi). Seeded from global defaults in the constructor.
-        private float _stabInterval;                 // release -> next windup, seconds
+        private float _stabInterval;                 // seconds from release to the next windup
         private StabDirection _stabDirection;        // which way each stab goes
 
         private bool _stancePending = true;   // issue EnableCombatStance once, on the first spawned tick
@@ -45,8 +43,8 @@ namespace MDS.Systems
 
         public MeleeDummy()
         {
-            // Each lever = its global default (settable) or the built-in fallback; TrySet does the typed
-            // parse/validate. A garbage global default just falls back to the built-in.
+            // Each lever takes its global default if set, otherwise the built-in fallback; TrySet parses it. A
+            // bad global default just falls back to the built-in.
             string ai = AiType.ToString();
             foreach (var (name, builtin) in DefaultLevers)
                 if (!TrySet(name, GlobalAiConfigurable.Default(ai, name, builtin), out _))
@@ -91,7 +89,7 @@ namespace MDS.Systems
             return intent;
         }
 
-        // "High"/"Low" for the next stab, per the configured direction.
+        // "High" or "Low" for the next stab, per the configured direction.
         private string NextStabDir()
         {
             switch (_stabDirection)
@@ -102,8 +100,6 @@ namespace MDS.Systems
                 default: return Random.value < 0.5f ? "High" : "Low"; // Random
             }
         }
-
-        // ---- IConfigurableAi ----
 
         public bool TrySet(string name, string value, out string error)
         {

@@ -5,11 +5,11 @@ using MDS.Systems;
 namespace MDS.ConsoleCommands
 {
     // rc bot cfg <target> [<lever> <value>]
-    //   with <lever> <value>: set one behavior lever on the matching bots (only those whose AI is configurable).
-    //   without: list the matching bots' current levers + values.
-    // <target> = playerId | all | attacking | defending | faction. This is a PER-BOT override; a lever's
-    // default comes from 'rc set globalAI <AiType> <lever>'. Mirrors the 'move' flow: resolve the target via
-    // BotTargetSelector, apply to each fitting bot, skip the rest.
+    //   with a lever and value: set one behaviour lever on the matching bots (only those whose AI is configurable).
+    //   without: list the matching bots' current levers and values.
+    // <target> is a playerId, all, attacking, defending, or a faction name. This is a per-bot override; a lever's
+    // default comes from 'rc set globalAI'. It mirrors the 'move' flow: resolve the target with BotTargetSelector,
+    // apply to each fitting bot, and skip the rest.
     public class CfgSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Cfg;

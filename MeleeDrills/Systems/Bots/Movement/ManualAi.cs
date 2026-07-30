@@ -3,17 +3,17 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // A manually-driven AI: a test harness for movement behaviors. Holds one current MoveOrder and, each
-    // tick, returns the BotIntent for it. The order is set by 'rc bot move', which reaches ONLY bots already
-    // on this AI - it never reassigns AI - so a bot stays under Manual control until an admin changes its AI.
-    // Defaults to Stop (stands still) until ordered.
+    // A manually driven AI, used as a test harness for movement behaviors. It holds one current MoveOrder and
+    // returns the BotIntent for it each tick. The order is set by 'rc bot move', which reaches only bots already
+    // on this AI and never reassigns AI, so a bot stays under Manual control until an admin changes its AI. It
+    // defaults to Stop until ordered.
     //
-    // Motion orders (Seek/Arrive/Flee/Pursue/Evade and Wander) run through the Steering world-velocity layer,
-    // so corrective behaviors can be BLENDED onto the primary: the order's Separate / Avoid / Dodge flags mix
-    // in Separation (repulsion from nearby bots), Obstacle Avoidance (steer around walls) and Collision
-    // Avoidance (steer around moving agents) respectively, before the result is assembled into an intent.
-    // A player target is resolved to its LIVE position each tick; if it isn't spawned, the bot halts.
-    // Decoupled facing is a thin override on the assembled intent - "move there, but face this".
+    // Motion orders (Seek, Arrive, Flee, Pursue, Evade, Wander) run through the Steering world-velocity layer, so
+    // corrective behaviors can be blended onto the primary: the order's Separate, Avoid, and Dodge flags mix in
+    // Separation (repulsion from nearby bots), Obstacle Avoidance (steer around walls), and Collision Avoidance
+    // (steer around moving agents) respectively, before the result is assembled into an intent. A player target
+    // is resolved to its live position each tick, and if it isn't spawned the bot halts. Decoupled facing is a
+    // thin override on the assembled intent: move there, but face this.
     public class ManualAi : IBotAi
     {
         public BotAiEnum AiType => BotAiEnum.Manual;
@@ -23,15 +23,15 @@ namespace MDS.Systems
 
         // Corrective behavior blend weights, relative to the primary steering (weight 1).
         private const float SeparationWeight = 1.5f;
-        private const float AvoidWeight = 2f;      // obstacle avoidance - strong, so it wins near a wall
-        private const float DodgeWeight = 1.2f;    // collision avoidance; also urgency-scaled inside the behavior
+        private const float AvoidWeight = 2f;      // obstacle avoidance, strong so it wins near a wall
+        private const float DodgeWeight = 1.2f;    // collision avoidance, also urgency-scaled inside the behavior
 
         private MoveOrder _order = MoveOrder.Stop();
         private float _wanderAngle;   // persistent state for Wander; reset on each new order
 
-        // Run is a sticky engine mode (set once, not per tick), so the AI - not the command - establishes it,
-        // on the first real tick after an order is set. This makes it survive a Replace: InheritFrom routes
-        // through SetOrder, which re-arms this, so the replacement starts running instead of walking.
+        // Run is a sticky engine mode set once, not per tick, so the AI (not the command) establishes it on the
+        // first real tick after an order is set. This makes it survive a Replace: InheritFrom routes through
+        // SetOrder, which re-arms this, so the replacement starts running instead of walking.
         private bool _runStatePending;
 
         // Target-velocity estimate for Pursue/Evade (world XZ units/sec), tracked across ticks.
@@ -48,10 +48,10 @@ namespace MDS.Systems
             _runStatePending = true;
         }
 
-        // Replace-policy hand-off: resume the standing order of the bot we replace, so a killed bot's
-        // replacement carries on instead of standing inert. Routed through SetOrder deliberately - that also
-        // clears the wander drift and target-velocity estimate, which MUST start fresh because this is a new
-        // body at the death position (stale values would give it a bogus first tick).
+        // Replace hand-off: resume the standing order of the bot we replace, so a killed bot's replacement carries
+        // on instead of standing inert. Routed through SetOrder deliberately, since that also clears the wander
+        // drift and target-velocity estimate, which must start fresh: this is a new body at the death position and
+        // stale values would give it a bogus first tick.
         public void InheritFrom(IBotAi previous)
         {
             if (previous is ManualAi manual)
@@ -61,7 +61,7 @@ namespace MDS.Systems
         public BotIntent Decide(BotController self, float deltaTime)
         {
             if (!self.TryGetPose(out BotPose pose))
-                return BotIntent.Idle; // not currently spawned - issue nothing
+                return BotIntent.Idle; // not currently spawned; issue nothing
 
             BotIntent intent;
             switch (_order.Kind)
@@ -145,9 +145,9 @@ namespace MDS.Systems
             return Steering.Blend(parts.ToArray());
         }
 
-        // Neighbouring characters from the shared per-tick snapshot - this includes human PLAYERS as well as
-        // other bots, so bots separate from / dodge you too. Positions gathered when Separate is set,
-        // positions+velocities when Dodge is set.
+        // Neighbouring characters from the shared per-tick snapshot. This includes human players as well as other
+        // bots, so bots separate from and dodge you too. Positions are gathered when Separate is set, positions
+        // and velocities when Dodge is set.
         private void GatherNeighbours(BotController self, out List<Vector2> positions, out List<(Vector2 pos, Vector2 vel)> withVel)
         {
             positions = _order.Separate ? new List<Vector2>() : null;
