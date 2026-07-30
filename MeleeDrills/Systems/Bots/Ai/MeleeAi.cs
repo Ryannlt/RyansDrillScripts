@@ -10,19 +10,16 @@ namespace MDS.Systems
     // enemy's melee state, read from its packets); actuation is the BotIntent action channel (block/strike
     // tokens confirmed on a live bot via 'rc bot act').
     //
-    // ONE class, three presets (BotAiEnum): the old Defend/Fight "modes" are now three capability toggles -
-    //   press   (throw the first blow when the enemy isn't threatening),
-    //   riposte (counter after our guard absorbs a committed attack), and
-    //   move    (hold/adjust melee spacing vs. stand our ground) -
+    // ONE class, presets selected by BotAiEnum: capability toggles - press (throw the first blow when the enemy
+    // isn't threatening), riposte (counter after our guard absorbs a committed attack), move (hold/adjust melee
+    // spacing vs. stand our ground), pursue (chase vs. hold ground), engageOnAttack (passive until struck) -
     // bundled into named defaults by DefaultLeversFor:
-    //   MeleeDefend = block only (press off, riposte off, move on, pursue off) - a target to practise attacks
-    //                 against that holds ground and blocks but won't chase, so you can back off to disengage.
-    //   MeleeFight  = press on, riposte on, move on - crowds in and trades.
-    //   Sparring    = press off, riposte on, move off - stands its ground, blocks, and only counters once
-    //                 provoked ("wait for someone to initiate"), engaging only the closest player in range.
-    //   Guardian    = passive until attacked (engageOnAttack): reads/blocks the nearest player in range, then on
-    //                 being struck locks onto that attacker and fights (full MeleeFight) until it or the attacker
-    //                 dies, then returns to passive. A Replace replacement starts passive again.
+    //   RiposteDummy = press false, riposte true, move false - stands its ground, blocks, and only counters once
+    //                  provoked, engaging only the closest player in range.
+    //   Dueling      = passive until attacked (engageOnAttack): reads/blocks the nearest player in range, then on
+    //                  being struck locks onto that attacker and fights (press+riposte) until it or the attacker
+    //                  dies, then returns to passive. A Replace replacement starts passive again.
+    // (StabbingDummy is a separate class, MeleeDummy - a static stabber with no perception.)
     // Every tuning value is a lever (IConfigurableAi): 'rc bot cfg <id> <lever> <value>' per bot, defaulting
     // from globalAI. The strike MECHANIC constants (windup/recovery/commit timings) stay fixed - they encode how
     // the engine plays a stab out (measured), not difficulty, so exposing them would just let someone break it.
@@ -75,6 +72,7 @@ namespace MDS.Systems
         private float _targetRange;   // only acquire candidates within this range (<= 0 = unlimited)
         private bool _ignoreTeam;     // target any player regardless of faction (else enemies only)
         private bool _stickyTarget;   // keep the current target while valid (else re-pick the closest each tick)
+        private float _passiveRange;  // engageOnAttack: hold distance while WAITING/passive (engaged uses defensiveRange)
 
         private readonly BotAiEnum _aiType;
         private float _offensiveRange;                // close spacing actually in use (re-rolled for jitter)
@@ -88,6 +86,7 @@ namespace MDS.Systems
         private float _lockUntil;             // realtime the attacker-lock expires
         private bool _engaged;                // engageOnAttack runtime: provoked and fighting (vs passive). NOT inherited - a Replace replacement starts passive.
         private int? _engagedTargetId;        // engageOnAttack runtime: the attacker we fight until it (or we) die
+        private float _lastEngageBlock;       // engageOnAttack runtime: block time we last engaged off (dedupe)
         private bool _stancePending = true;   // issue EnableCombatStance once, on the first spawned tick
         private bool _runPending = true;      // establish the sticky run toggle once, on first engagement
         private string _blockToken;           // the block playerAction we're currently holding (null = not blocking)
@@ -134,28 +133,21 @@ namespace MDS.Systems
                 ("attackRange", "2.0"), ("attackReadBeat", "0.6"),
                 ("riposteReactionMin", "0"), ("riposteReactionMax", "0.5"), ("riposteWindow", "0.6"),
                 ("blockReactionMin", "0.1"), ("blockReactionMax", "0.2"), // a human-like beat before the guard goes up
-                ("ignoreTeam", "on"),                                   // target anyone by default (drill utility - no need to be on the opposing faction)
+                ("ignoreTeam", "true"),                                  // target anyone by default (drill utility - no need to be on the opposing faction)
+                ("passiveRange", "0.6"),                                // engageOnAttack waiting-mode hold distance (Dueling)
             };
             switch (aiType)
             {
-                case BotAiEnum.MeleeFight:
-                    levers.Add(("press", "on"));  levers.Add(("riposte", "on"));  levers.Add(("move", "on")); levers.Add(("pursue", "on"));
-                    levers.Add(("targetRange", "0")); levers.Add(("stickyTarget", "on")); levers.Add(("engageOnAttack", "off")); break;
-                case BotAiEnum.Sparring:
-                    // Only engages players who come close, faces the closest, and gives up when they leave.
-                    levers.Add(("press", "off")); levers.Add(("riposte", "on"));  levers.Add(("move", "off")); levers.Add(("pursue", "off"));
-                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "off")); levers.Add(("engageOnAttack", "off")); break;
-                case BotAiEnum.Guardian:
+                case BotAiEnum.Dueling:
                     // Passive (block only) until a player in range strikes it; then it locks onto that attacker and
                     // fights (these fight levers) until the attacker dies, then returns to passive. targetRange is
                     // the passive read/provoke range; while engaged the target is tracked regardless of range.
-                    levers.Add(("press", "on"));  levers.Add(("riposte", "on"));  levers.Add(("move", "on")); levers.Add(("pursue", "on"));
-                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "off")); levers.Add(("engageOnAttack", "on")); break;
-                default: // MeleeDefend
-                    // Holds ground and blocks but does NOT chase, so a player can back off to disengage; drops
-                    // the target entirely once they're past targetRange.
-                    levers.Add(("press", "off")); levers.Add(("riposte", "off")); levers.Add(("move", "on")); levers.Add(("pursue", "off"));
-                    levers.Add(("targetRange", "6")); levers.Add(("stickyTarget", "on")); levers.Add(("engageOnAttack", "off")); break;
+                    levers.Add(("press", "true"));  levers.Add(("riposte", "true"));  levers.Add(("move", "true")); levers.Add(("pursue", "true"));
+                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "true")); break;
+                default: // RiposteDummy
+                    // Only engages players who come close, faces the closest, and gives up when they leave.
+                    levers.Add(("press", "false")); levers.Add(("riposte", "true"));  levers.Add(("move", "false")); levers.Add(("pursue", "false"));
+                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "false")); break;
             }
             return levers.ToArray();
         }
@@ -279,8 +271,8 @@ namespace MDS.Systems
                     _blockToken = desiredBlock;
                 }
                 // Guarding: hold the further DEFENSIVE distance to make space to read, following a circling
-                // player instead of freezing.
-                intent.MoveAxis = _move ? HoldRange(pose, targetPos, MovementRange(false, now), pursue) : Vector2.zero;
+                // player instead of freezing. While WAITING (passive) hold the closer passiveRange instead.
+                intent.MoveAxis = _move ? HoldRange(pose, targetPos, passive ? _passiveRange : MovementRange(false, now), pursue) : Vector2.zero;
             }
             else
             {
@@ -292,13 +284,14 @@ namespace MDS.Systems
                     _blockToken = null;
                     droppedBlock = true;
                 }
-                // Free: 'press' closes to the OFFENSIVE range; otherwise hold the reading distance.
-                intent.MoveAxis = _move ? HoldRange(pose, targetPos, MovementRange(press, now), pursue) : Vector2.zero;
+                // Free: 'press' closes to the OFFENSIVE range; otherwise hold the reading distance. While WAITING
+                // (passive) hold the closer passiveRange so it doesn't back off far from an approaching player.
+                intent.MoveAxis = _move ? HoldRange(pose, targetPos, passive ? _passiveRange : MovementRange(press, now), pursue) : Vector2.zero;
 
                 // Attack when the enemy isn't threatening. With 'priority' this is the post-block riposte and
                 // fires immediately (ignoring cooldown/press); otherwise it's throwing FIRST, gated by 'press'.
                 // Skip the tick we drop the block (StopMeleeBlock took the action channel; strike resumes next).
-                // Also call while a chamber is in progress even if press/riposte just went off (e.g. a Guardian
+                // Also call while a chamber is in progress even if press/riposte just went off (e.g. a Dueling bot
                 // whose target died mid-swing drops to passive) so the held MeleeStrike is RELEASED cleanly
                 // instead of being left to auto-cycle.
                 if ((press || riposte || _attackPhase == AttackPhase.Chamber) && !droppedBlock)
@@ -435,7 +428,7 @@ namespace MDS.Systems
         //  2. Attacker-lock - once a candidate begins a strike we lock onto it through the exchange (plus a tail
         //     that covers our riposte), regardless of who's now closer, so we don't get pulled off an attacker.
         //  3. Sticky - keep the current target while it's still a valid candidate (Fight/Defend duel one foe).
-        //  4. Otherwise the nearest candidate (Sparring, stickyTarget off, re-picks the closest in range).
+        //  4. Otherwise the nearest candidate (RiposteDummy, stickyTarget false, re-picks the closest in range).
         // A "candidate" is a spawned OTHER player, filtered by team (unless ignoreTeam) and by targetRange.
         private IPlayer ResolveTarget(BotController self, float now)
         {
@@ -446,7 +439,7 @@ namespace MDS.Systems
                 if (IsCandidate(self, p, ignoreRange: true)) return p;
             }
 
-            // 1b. engageOnAttack (Guardian): a passive/engaged state machine that fully owns targeting.
+            // 1b. engageOnAttack (Dueling): a passive/engaged state machine that fully owns targeting.
             if (_engageOnAttack)
                 return ResolveEngageOnAttack(self, now);
 
@@ -492,10 +485,11 @@ namespace MDS.Systems
             return nearest;
         }
 
-        // engageOnAttack targeting (Guardian). PASSIVE: face/block the nearest candidate within targetRange but
-        // don't fight (Decide gates press/riposte/pursue off while passive). The moment a candidate in that range
-        // strikes, ENGAGE it - lock it as the target and fight (Decide re-enables the fight levers) until it dies,
-        // tracked regardless of range. When the engaged target dies/leaves we drop back to passive. _engaged is
+        // engageOnAttack targeting (Dueling). PASSIVE: face/block the nearest candidate within targetRange but
+        // don't fight (Decide gates press/riposte/pursue off while passive). We ENGAGE only the player whose
+        // attack our guard actually BLOCKS - a hit aimed at US - not just anyone swinging within range (which
+        // would grab players from other fights). Once engaged we lock that attacker and fight (Decide re-enables
+        // the fight levers) until it dies, tracked regardless of range, then drop back to passive. _engaged is
         // runtime only (not inherited), so a Replace replacement starts passive again.
         private IPlayer ResolveEngageOnAttack(BotController self, float now)
         {
@@ -511,17 +505,26 @@ namespace MDS.Systems
                 _engagedTargetId = null;
             }
 
-            // Passive: a striker within our (small) targetRange provokes us into engaging that attacker.
-            IPlayer striker = FindNearestStriker(self, now);
-            if (striker != null)
+            // Passive: engage the player whose strike we just BLOCKED (confirmed aimed at us), by id from the
+            // block event - so a swing at someone else nearby never provokes us.
+            float myBlock = CombatTracker.LastBlockTime(self.PlayerId);
+            if (myBlock > _lastEngageBlock)
             {
-                _engaged = true;
-                _engagedTargetId = striker.PlayerId;
-                _targetId = striker.PlayerId;
-                return striker;
+                _lastEngageBlock = myBlock;
+                if (CombatTracker.LastBlockAttacker(self.PlayerId) is int a)
+                {
+                    IPlayer atk = StateTracker.GetPlayerById(a);
+                    if (IsCandidate(self, atk, ignoreRange: true))
+                    {
+                        _engaged = true;
+                        _engagedTargetId = a;
+                        _targetId = a;
+                        return atk;
+                    }
+                }
             }
 
-            // Nobody attacking: just face/block the nearest player in range.
+            // Nobody has attacked us yet: just face/block the nearest player in range (the "waiting" posture).
             IPlayer near = FindNearestCandidate(self);
             _targetId = near?.PlayerId;
             return near;
@@ -617,7 +620,7 @@ namespace MDS.Systems
             "offensiveRange", "offensiveRangeVariance", "defensiveRange", "defensiveRangeVariance",
             "attackRange", "attackReadBeat", "riposteReactionMin", "riposteReactionMax", "riposteWindow",
             "blockReactionMin", "blockReactionMax", "press", "riposte", "move", "pursue",
-            "targetRange", "ignoreTeam", "stickyTarget", "engageOnAttack"
+            "targetRange", "ignoreTeam", "stickyTarget", "engageOnAttack", "passiveRange"
         };
 
         public bool TrySet(string name, string value, out string error)
@@ -644,6 +647,7 @@ namespace MDS.Systems
                 case "ignoreteam":   return SetBool(value, v => _ignoreTeam = v, "ignoreTeam", ref error);
                 case "stickytarget": return SetBool(value, v => _stickyTarget = v, "stickyTarget", ref error);
                 case "engageonattack": return SetBool(value, v => _engageOnAttack = v, "engageOnAttack", ref error);
+                case "passiverange": return SetFloat(value, 0f, v => _passiveRange = v, "passiveRange", ref error);
                 default:
                     error = $"Unknown lever '{name}'. MeleeAi levers: {string.Join(", ", LeverNames)}.";
                     return false;
@@ -663,14 +667,15 @@ namespace MDS.Systems
             yield return ("riposteWindow", _riposteWindow.ToString("0.##"));
             yield return ("blockReactionMin", _blockReactionMin.ToString("0.##"));
             yield return ("blockReactionMax", _blockReactionMax.ToString("0.##"));
-            yield return ("press", _press ? "on" : "off");
-            yield return ("riposte", _riposte ? "on" : "off");
-            yield return ("move", _move ? "on" : "off");
-            yield return ("pursue", _pursue ? "on" : "off");
+            yield return ("press", _press ? "true" : "false");
+            yield return ("riposte", _riposte ? "true" : "false");
+            yield return ("move", _move ? "true" : "false");
+            yield return ("pursue", _pursue ? "true" : "false");
             yield return ("targetRange", _targetRange.ToString("0.##"));
-            yield return ("ignoreTeam", _ignoreTeam ? "on" : "off");
-            yield return ("stickyTarget", _stickyTarget ? "on" : "off");
-            yield return ("engageOnAttack", _engageOnAttack ? "on" : "off");
+            yield return ("ignoreTeam", _ignoreTeam ? "true" : "false");
+            yield return ("stickyTarget", _stickyTarget ? "true" : "false");
+            yield return ("engageOnAttack", _engageOnAttack ? "true" : "false");
+            yield return ("passiveRange", _passiveRange.ToString("0.##"));
         }
 
         private static bool SetFloat(string value, float min, System.Action<float> set, string name, ref string error)
@@ -688,9 +693,9 @@ namespace MDS.Systems
         {
             switch (value.ToLowerInvariant())
             {
-                case "on": case "true": case "1": case "yes": set(true); return true;
-                case "off": case "false": case "0": case "no": set(false); return true;
-                default: error = $"{name} must be on or off."; return false;
+                case "true": case "on": case "1": case "yes": set(true); return true;
+                case "false": case "off": case "0": case "no": set(false); return true;
+                default: error = $"{name} must be true or false."; return false;
             }
         }
 
@@ -708,6 +713,7 @@ namespace MDS.Systems
             _blockReactionMin = p._blockReactionMin; _blockReactionMax = p._blockReactionMax;
             _press = p._press; _riposte = p._riposte; _move = p._move; _pursue = p._pursue;
             _targetRange = p._targetRange; _ignoreTeam = p._ignoreTeam; _stickyTarget = p._stickyTarget;
+            _passiveRange = p._passiveRange;
             _engageOnAttack = p._engageOnAttack; // carry the lever; _engaged/_engagedTargetId are NOT carried, so a replacement starts passive
             _assignedTargetId = p._assignedTargetId;
             RollHoldRange();

@@ -32,7 +32,7 @@ namespace MDS.ConsoleCommands
                 return false;
             }
 
-            // A name may exist in the enum before its AI is wired up (e.g. MeleeFight). Reject those cleanly
+            // A name can exist in the enum before its AI is wired up in BotAiFactory. Reject those cleanly
             // instead of letting the factory fall back to a do-nothing bot.
             if (!BotAiFactory.IsRegistered(ai))
             {

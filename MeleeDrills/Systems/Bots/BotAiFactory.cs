@@ -15,11 +15,9 @@ namespace MDS.Systems
         {
             Register(BotAiEnum.None, () => new NoneAi());
             Register(BotAiEnum.Manual, () => new ManualAi());
-            Register(BotAiEnum.MeleeDefend, () => new MeleeAi(BotAiEnum.MeleeDefend));
-            Register(BotAiEnum.MeleeFight, () => new MeleeAi(BotAiEnum.MeleeFight));
-            Register(BotAiEnum.MeleeDummy, () => new MeleeDummy());
-            Register(BotAiEnum.Sparring, () => new MeleeAi(BotAiEnum.Sparring));
-            Register(BotAiEnum.Guardian, () => new MeleeAi(BotAiEnum.Guardian));
+            Register(BotAiEnum.StabbingDummy, () => new MeleeDummy());
+            Register(BotAiEnum.RiposteDummy, () => new MeleeAi(BotAiEnum.RiposteDummy));
+            Register(BotAiEnum.Dueling, () => new MeleeAi(BotAiEnum.Dueling));
 
             Logger.Log($"Registered {_factories.Count} bot AI type(s).", LogLevel.INFO);
         }
