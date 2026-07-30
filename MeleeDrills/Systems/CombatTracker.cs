@@ -38,6 +38,10 @@ namespace MDS.Systems
         // counter" signal - far better than timing the lethal window blind.
         private static readonly Dictionary<int, float> _lastBlock = new();
 
+        // Who each defender most recently blocked (the attacker of their last absorbed hit). Lets a bot engage
+        // the player who actually attacked IT, rather than anyone merely swinging nearby.
+        private static readonly Dictionary<int, int> _lastBlockAttacker = new();
+
         public static void OnPacket(int playerId, PlayerActions[] actions)
         {
             if (actions == null || actions.Length == 0) return;
@@ -77,15 +81,23 @@ namespace MDS.Systems
 
         // A block landed: defenderId successfully blocked attackerId's strike. (The attacker's own recovery is
         // NOT shortcut by this - a blocked stab still costs the full ~1.5s swing recovery, same as a miss.)
-        public static void OnBlock(int attackerId, int defenderId) => _lastBlock[defenderId] = Time.realtimeSinceStartup;
+        public static void OnBlock(int attackerId, int defenderId)
+        {
+            _lastBlock[defenderId] = Time.realtimeSinceStartup;
+            _lastBlockAttacker[defenderId] = attackerId;
+        }
 
         // Realtime of playerId's last successful block as defender, or 0 if none seen.
         public static float LastBlockTime(int playerId) => _lastBlock.TryGetValue(playerId, out float t) ? t : 0f;
+
+        // The attacker of playerId's last absorbed hit (as defender), or null if none seen.
+        public static int? LastBlockAttacker(int playerId) => _lastBlockAttacker.TryGetValue(playerId, out int a) ? a : (int?)null;
 
         public static void Reset()
         {
             _states.Clear();
             _lastBlock.Clear();
+            _lastBlockAttacker.Clear();
         }
     }
 }

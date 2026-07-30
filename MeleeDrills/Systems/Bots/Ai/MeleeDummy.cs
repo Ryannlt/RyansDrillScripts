@@ -4,13 +4,13 @@ using MDS.ConfigVariables;
 
 namespace MDS.Systems
 {
-    // A static training dummy: stands where it spawned, keeps its spawn facing, and throws a stab on a steady
-    // cadence for a player to walk up to and practice blocking/attacking against. No perception, targeting, or
-    // movement - the opposite of MeleeAi. Set with 'rc bot setBotAi <id> MeleeDummy'; aim it by facing the way
-    // you want when you summon it.
+    // The StabbingDummy AI: a static training dummy that stands where it spawned, keeps its spawn facing, and
+    // throws a stab on a steady cadence for a player to walk up to and practice blocking/attacking against. No
+    // perception, targeting, or movement - the opposite of MeleeAi. Set with 'rc bot setBotAi <id> StabbingDummy';
+    // aim it by facing the way you want when you summon it. (The class stays MeleeDummy; the AI name is StabbingDummy.)
     //
     // First CONFIGURABLE ai: its two levers (stabInterval, stabDirection) are settable per-bot with
-    // 'rc bot cfg <id> <lever> <value>', defaulting from GlobalAiConfigurable ('rc set globalAI MeleeDummy <lever> ...').
+    // 'rc bot cfg <id> <lever> <value>', defaulting from GlobalAiConfigurable ('rc set globalAI StabbingDummy <lever> ...').
     //
     // Reuses the confirmed strike mechanics (single MeleeStrike self-holds the windup, one ExecuteMeleeWeaponStrike
     // releases it cleanly, and a committed stab occupies ~1.5s before it can throw again) with its own tiny loop,
@@ -24,7 +24,7 @@ namespace MDS.Systems
 
         // Built-in lever defaults (name -> value), the single source for these values: the constructor uses them
         // as its fallback, and GlobalAiConfigurable seeds its global defaults from here so
-        // 'rc get globalAI MeleeDummy <lever>' reports a real value instead of "not set".
+        // 'rc get globalAI StabbingDummy <lever>' reports a real value instead of "not set".
         public static readonly (string name, string value)[] DefaultLevers =
         {
             ("stabInterval", "1.7"),    // release -> next windup, seconds (>~1.5s stab recovery + a beat)
@@ -41,7 +41,7 @@ namespace MDS.Systems
         private float _nextWindupAt;          // realtime the next stab may begin
         private bool _lastHigh;               // toggles for StabDirection.Alternate
 
-        public BotAiEnum AiType => BotAiEnum.MeleeDummy;
+        public BotAiEnum AiType => BotAiEnum.StabbingDummy;
 
         public MeleeDummy()
         {
@@ -129,7 +129,7 @@ namespace MDS.Systems
                     return true;
 
                 default:
-                    error = $"Unknown lever '{name}'. MeleeDummy levers: stabInterval, stabDirection.";
+                    error = $"Unknown lever '{name}'. StabbingDummy levers: stabInterval, stabDirection.";
                     return false;
             }
         }

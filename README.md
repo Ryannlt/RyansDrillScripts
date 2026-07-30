@@ -30,7 +30,7 @@ rc openmelee 2 7
 ```
 rc bot spawn 5 French ArmyLineInfantry
 rc bot summon French ArmyLineInfantry None Replace
-rc bot setBotAi all MeleeFight
+rc bot setBotAi all Dueling
 rc bot cfg 42 stabInterval 2.5
 rc bot move all seek me
 rc bot remove all
@@ -45,8 +45,8 @@ rc get xvxDistance
 rc get Players all
 rc set xvxDistance 5
 rc set lineBotCount 10
-rc set globalAI MeleeDummy stabInterval 2.5
-rc get globalAI MeleeDummy stabInterval
+rc set globalAI StabbingDummy stabInterval 2.5
+rc get globalAI StabbingDummy stabInterval
 ```
 
 ---
@@ -278,13 +278,13 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 * Sets the AI behaviour for one or more tracked bots immediately.
 * **Target:** `all`, `attacking`, `defending`, `<faction>` (e.g. `French`), or `<playerId>`
-* **AI types:** `None`, `Manual`, `MeleeDefend`, `MeleeFight`, `MeleeDummy` — see **[Bot AI Types](#bot-ai-types)**.
+* **AI types:** `None`, `Manual`, `StabbingDummy`, `RiposteDummy`, `Dueling` — see **[Bot AI Types](#bot-ai-types)**.
 * **Examples:**
 
   ```
-  rc bot setBotAi all MeleeFight
-  rc bot setBotAi French MeleeDefend
-  rc bot setBotAi 42 MeleeDummy
+  rc bot setBotAi all Dueling
+  rc bot setBotAi French RiposteDummy
+  rc bot setBotAi 42 StabbingDummy
   ```
 
 ### `setBotDeathPolicy`
@@ -364,7 +364,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 **Usage:** `rc bot cfg <target> [<lever> <value>]`
 
-* Sets or lists **per-bot AI levers** — a granular override for one bot/group on top of the global default. Only affects bots whose AI is configurable (`MeleeDummy`, and the melee AIs `MeleeDefend` / `MeleeFight` / `Sparring`); others are skipped with a message.
+* Sets or lists **per-bot AI levers** — a granular override for one bot/group on top of the global default. Only affects bots whose AI is configurable (`StabbingDummy`, `RiposteDummy`, `Dueling`); others are skipped with a message.
 * **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
 * With `<lever> <value>` — set that lever on the matching bots.
 * Without a lever — list the matching bots' current levers and values.
@@ -394,13 +394,11 @@ Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot 
 | --- | --- |
 | `None` | Does nothing — stands where it spawned. |
 | `Manual` | Manually driven with `rc bot move` (a movement test harness: seek, arrive, flee, pursue, evade, wander, face…). Issues no orders on its own. |
-| `MeleeDefend` | Defensive melee — faces the closest player and reactively blocks its attacks (mirrors left/right, matches high/low). Holds its ground and backs off if crowded, but **won't chase**, so you can walk away to disengage. |
-| `MeleeFight` | Offensive melee — everything `MeleeDefend` does, plus a riposte stab during the enemy's recovery window, and closes into the player's face. |
-| `Sparring` | Reactive melee — stands its ground, blocks, and only **counters once provoked** (never throws first). A patient sparring partner: walk up and attack it, it blocks and ripostes. |
-| `Guardian` | Sentry melee — **passive** (reads and blocks the closest player in range) until a player attacks it; then it locks onto that attacker and fights to the death (full `MeleeFight`). When its target dies it returns to passive; if it dies and is replaced, the replacement starts passive again. |
-| `MeleeDummy` | Static training dummy — stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking/attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
+| `StabbingDummy` | Static training dummy — stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking/attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
+| `RiposteDummy` | Reactive melee — stands its ground, blocks, and only **counters once provoked** (never throws first). A patient sparring partner: walk up and attack it, it blocks and ripostes. |
+| `Dueling` | Sentry melee — **passive** (reads and blocks the closest player in range) until a player attacks it and it **blocks the hit**; then it locks onto that attacker and fights to the death. When its target dies it returns to passive; if it dies and is replaced, the replacement starts passive again. |
 
-`MeleeDefend`, `MeleeFight`, `Sparring`, and `Guardian` are four **presets of one configurable melee AI** — the same behaviour with different capability toggles (`press` / `riposte` / `move` / `engageOnAttack`) and tuning. Tweak any of them per bot with `rc bot cfg` (see below).
+`RiposteDummy` and `Dueling` are **presets of one configurable melee AI** — the same behaviour with different capability toggles (`press` / `riposte` / `move` / `pursue` / `engageOnAttack`) and tuning; the former `MeleeFight`/`MeleeDefend` behaviours are reachable by tuning those levers. `StabbingDummy` is a separate static-stabber AI. Tweak any per bot with `rc bot cfg` (see below).
 
 ### Configurable AI levers
 
@@ -413,7 +411,7 @@ Some AIs expose named **levers** you can tune. A lever's value resolves in three
 
 Changing a global default affects **newly created** bots of that AI, not ones already spawned.
 
-**`MeleeDummy` levers**
+**`StabbingDummy` levers**
 
 | Lever | Values | Default | Meaning |
 | --- | --- | --- | --- |
@@ -424,26 +422,26 @@ Changing a global default affects **newly created** bots of that AI, not ones al
 
 ```
 rc bot summon Defending ArmyLineInfantry
-rc bot setBotAi <id> MeleeDummy
+rc bot setBotAi <id> StabbingDummy
 rc bot cfg <id> stabInterval 3
 rc bot cfg <id> stabDirection High
 ```
 
-**`MeleeDefend` / `MeleeFight` / `Sparring` levers**
+**`RiposteDummy` / `Dueling` levers**
 
-All three are presets of one melee AI and share the same levers. They differ only in the defaults of the **toggles and targeting**:
+Both are presets of one melee AI and share the same levers. They differ only in the defaults of the **toggles and targeting** (booleans are `true`/`false`; `on`/`off` is still accepted as input):
 
-| Setting | `MeleeFight` | `MeleeDefend` | `Sparring` | `Guardian` | Meaning |
-| --- | --- | --- | --- | --- | --- |
-| `press` | `on` | `off` | `off` | `on` | Throw the first blow when the enemy isn't threatening. |
-| `riposte` | `on` | `off` | `on` | `on` | Counter after the guard absorbs a hit. |
-| `move` | `on` | `on` | `off` | `on` | Hold/adjust melee spacing vs. stand its ground. |
-| `pursue` | `on` | `off` | `off` | `on` | Advance toward a target that's too far vs. only hold/back off. `off` lets a player back away and **disengage** instead of being followed. |
-| `stickyTarget` | `on` | `on` | `off` | `off` | Keep one target while valid vs. re-pick the **closest** each tick. |
-| `targetRange` | `0` | `6` | `4` | `4` | Only engage players within this many metres (`0` = unlimited); drops the target past it. For `Guardian` this is its passive read/provoke range. |
-| `engageOnAttack` | `off` | `off` | `off` | `on` | Start **passive** (block only, `press`/`riposte`/`pursue` suppressed) and only fight a player who attacks it, until that target dies — then back to passive. |
+| Setting | `RiposteDummy` | `Dueling` | Meaning |
+| --- | --- | --- | --- |
+| `press` | `false` | `true` | Throw the first blow when the enemy isn't threatening. |
+| `riposte` | `true` | `true` | Counter after the guard absorbs a hit. |
+| `move` | `false` | `true` | Hold/adjust melee spacing vs. stand its ground. |
+| `pursue` | `false` | `true` | Advance toward a target that's too far vs. only hold/back off. `false` lets a player back away and **disengage** instead of being followed. |
+| `stickyTarget` | `false` | `false` | Keep one target while valid vs. re-pick the **closest** each tick. |
+| `targetRange` | `4` | `4` | Only engage players within this many metres (`0` = unlimited); drops the target past it. For `Dueling` this is its passive read/provoke range. |
+| `engageOnAttack` | `false` | `true` | Start **passive** (block only, `press`/`riposte`/`pursue` suppressed) and engage only a player whose attack it **blocks** (a hit aimed at it, not just anyone swinging nearby), fighting that target until it dies — then back to passive. |
 
-The **tuning levers** below share the same defaults across all three presets (`seconds ≥ 0` or `metres`, floats):
+The **tuning levers** below share the same defaults across both presets (`seconds ≥ 0` or `metres`, floats):
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
@@ -458,16 +456,17 @@ The **tuning levers** below share the same defaults across all three presets (`s
 | `defensiveRangeVariance` | `0.4` | Random jitter added on top of `defensiveRange`. |
 | `attackRange` | `2.0` | How close before it commits a stab (metres). |
 | `attackReadBeat` | `0.6` | Extra randomised beat added to the attack cooldown (seconds; pacing). |
-| `ignoreTeam` | `on` | Target **any** player regardless of faction (`off` = enemies only). Defaults `on` so you don't have to be on the opposing team to use a bot. |
+| `ignoreTeam` | `true` | Target **any** player regardless of faction (`false` = enemies only). Defaults `true` so you don't have to be on the opposing team to use a bot. |
+| `passiveRange` | `0.6` | `Dueling` only: the hold distance while **waiting** (passive). Small so it stands its ground instead of backing off ~`defensiveRange` from an approaching player; it uses `defensiveRange` once engaged. |
 
-`blockReaction` defaults to a ~0.1–0.2s human beat before the guard goes up — raise it for an easier bot, or set both to `0` for an instant/superhuman block. `MeleeDefend` holds its ground and blocks but won't chase (`pursue off`), so you can simply **walk away to disengage**; it drops you once you're past `targetRange` (6m).
+`blockReaction` defaults to a ~0.1–0.2s human beat before the guard goes up — raise it for an easier bot, or set both to `0` for an instant/superhuman block. With `pursue false` (the `RiposteDummy` default, and while a `Dueling` bot is passive) the bot holds its ground and won't chase, so a player can **walk away to disengage**.
 
 **Attacker-lock** (automatic, no lever): once a player within melee range begins a strike, the bot locks onto them through the exchange — including its riposte — regardless of who else is closer, so it can't be pulled off an attacker mid-fight.
 
-*Example — an easier `MeleeFight` bot that takes ~0.25–0.4s to block:*
+*Example — an easier `Dueling` bot that takes ~0.25–0.4s to block:*
 
 ```
-rc bot summon Defending ArmyLineInfantry MeleeFight
+rc bot summon Defending ArmyLineInfantry Dueling
 rc bot cfg <id> blockReactionMin 0.25
 rc bot cfg <id> blockReactionMax 0.4
 ```
@@ -524,7 +523,7 @@ rc bot cfg <id> blockReactionMax 0.4
   * **default:** `90` (NorthSouth)
 * **botDefaultAi** — Default AI behaviour assigned to bots that do not specify one inline.
 
-  * **args:** `None | Manual | MeleeDefend | MeleeFight | Sparring | Guardian | MeleeDummy` (see [Bot AI Types](#bot-ai-types))
+  * **args:** `None | Manual | StabbingDummy | RiposteDummy | Dueling` (see [Bot AI Types](#bot-ai-types))
   * **default:** `None`
 * **botDefaultDeathPolicy** — Default death policy assigned to bots that do not specify one inline.
 
@@ -540,9 +539,9 @@ rc bot cfg <id> blockReactionMax 0.4
   * **default:** `0.5`
 * **globalAI** — Global **default** value for a configurable AI lever (per-bot overrides are the separate `rc bot cfg` command). Reads/writes one lever at a time. See [Configurable AI levers](#configurable-ai-levers).
 
-  * **set args:** `<AiType> <lever> <value>` — e.g. `rc set globalAI MeleeDummy stabInterval 2.5`
-  * **get args:** `<AiType> <lever>` — e.g. `rc get globalAI MeleeDummy stabInterval`
-  * **default:** each AI's built-in lever values (e.g. `MeleeDummy stabInterval` = `1.7`)
+  * **set args:** `<AiType> <lever> <value>` — e.g. `rc set globalAI StabbingDummy stabInterval 2.5`
+  * **get args:** `<AiType> <lever>` — e.g. `rc get globalAI StabbingDummy stabInterval`
+  * **default:** each AI's built-in lever values (e.g. `StabbingDummy stabInterval` = `1.7`)
 * **lineBotCount** — Default number of bots in a `summonLine` or `spawnLine` when count is not specified inline.
 
   * **args:** `count (int, > 0)`
@@ -586,7 +585,7 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 ### Bot
 
-* **SetBotDefaultAi** — `None | Manual | MeleeDefend | MeleeFight | Sparring | Guardian | MeleeDummy`
+* **SetBotDefaultAi** — `None | Manual | StabbingDummy | RiposteDummy | Dueling`
 * **SetBotDefaultDeathPolicy** — `None | Kick | Replace`
 * **SetBotKickDelay** — `seconds(float)`
 * **SetBotReplaceDelay** — `seconds(float)`
@@ -597,8 +596,8 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
   *Examples:*
 
   ```
-  mod_variable_local MDS:SetGlobalAi:MeleeDummy,stabInterval,2.5
-  mod_variable_local MDS:SetGlobalAi:MeleeDummy,stabDirection,High
+  mod_variable_local MDS:SetGlobalAi:StabbingDummy,stabInterval,2.5
+  mod_variable_local MDS:SetGlobalAi:StabbingDummy,stabDirection,High
   ```
 
 ### Line
@@ -645,11 +644,11 @@ mod_variable_local MDS:SetOpenMeleeOffset:7
 mod_variable_local MDS:SetOrientation:NorthSouth
 
 # Bots
-mod_variable_local MDS:SetBotDefaultAi:MeleeFight
+mod_variable_local MDS:SetBotDefaultAi:Dueling
 mod_variable_local MDS:SetBotDefaultDeathPolicy:Replace
 mod_variable_local MDS:SetBotKickDelay:2
 mod_variable_local MDS:SetBotReplaceDelay:0.5
-mod_variable_local MDS:SetGlobalAi:MeleeDummy,stabInterval,2.5
+mod_variable_local MDS:SetGlobalAi:StabbingDummy,stabInterval,2.5
 mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
 mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
 ```
@@ -662,7 +661,7 @@ mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Re
 * Modded UI
 * Multi-arena support
 * More melee AI depth (feints, spins, advanced movement) and difficulty scaling
-* Configurable levers for the combat AIs (`MeleeDefend` / `MeleeFight`), AI presets, and target control
+* Saved preset bundles, config-at-summon, and a supervisor layer for target/session control
 
 ---
 
