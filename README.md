@@ -234,7 +234,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 * `faction` and `class` default to the caller's current faction/class if omitted. Providing `faction` without `class` uses the caller's class.
 * `faction` accepts `attacking` / `defending` (resolved to the round's factions) as well as a faction name (e.g. `French`).
 * `ai` and `death` default to `botDefaultAi` and `botDefaultDeathPolicy`.
-* Arguments are **strictly positional** — omit from the right, not the middle.
+* Arguments are **strictly positional**: omit from the right, not the middle.
 * **Examples:**
 
   ```
@@ -278,7 +278,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 * Sets the AI behaviour for one or more tracked bots immediately.
 * **Target:** `all`, `attacking`, `defending`, `<faction>` (e.g. `French`), or `<playerId>`
-* **AI types:** `None`, `Manual`, `StabbingDummy`, `RiposteDummy`, `Dueling` — see **[Bot AI Types](#bot-ai-types)**.
+* **AI types:** `None`, `Manual`, `StabbingDummy`, `RiposteDummy`, `Dueling`: see **[Bot AI Types](#bot-ai-types)**.
 * **Examples:**
 
   ```
@@ -294,9 +294,9 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 * Sets the death policy for one or more tracked bots.
 * **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
 * **Policies:**
-  * `None` — do nothing, defaulting to in game handling (They respawn at a random spawn as a random class)
-  * `Kick` — kick the bot after `botKickDelay` seconds (lets the kill register)
-  * `Replace` — kick then re-spawn with the same identity (name, regtag, uniform, faction, class) at death location
+  * `None`: do nothing, defaulting to in game handling (They respawn at a random spawn as a random class)
+  * `Kick`: kick the bot after `botKickDelay` seconds (lets the kill register)
+  * `Replace`: kick then re-spawn with the same identity (name, regtag, uniform, faction, class) at death location
 * **Examples:**
 
   ```
@@ -338,18 +338,18 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 * Drives bots that are on the **`Manual`** AI (set it first with `rc bot setBotAi <target> Manual`). Bots on other AIs are left untouched.
 * **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
 * **Behaviors:**
-  * `seek <dest>` — run toward a point/player
-  * `arrive <dest>` — like seek, but decelerate to a smooth stop
-  * `flee <dest>` — run directly away (`flee me facing me` = backpedal toward you)
-  * `pursue <dest>` — lead a moving target to intercept it (predictive seek)
-  * `evade <dest>` — flee from where a target is heading (predictive flee)
-  * `wander` — roam continuously with gentle random turns
-  * `facepoint <dest>` — rotate in place to face a point/player
-  * `face <deg>` — rotate in place to a heading (degrees from North)
-  * `stop` — halt movement
-* **`<dest>`** = `x z` (two numbers) | `<playerId>` | `me`. A player/`me` destination is tracked **live** as they move.
+  * `seek <dest>`: run toward a point/player
+  * `arrive <dest>`: like seek, but decelerate to a smooth stop
+  * `flee <dest>`: run directly away (`flee me facing me` = backpedal toward you)
+  * `pursue <dest>`: lead a moving target to intercept it (predictive seek)
+  * `evade <dest>`: flee from where a target is heading (predictive flee)
+  * `wander`: roam continuously with gentle random turns
+  * `facepoint <dest>`: rotate in place to face a point/player
+  * `face <deg>`: rotate in place to a heading (degrees from North)
+  * `stop`: halt movement
+* **`<dest>`** = `x z` (two numbers), `<playerId>`, or `me`. A player or `me` destination is tracked live as they move.
 * **Flags** (any combination, appended anywhere): `separate` (spread apart from other bots), `avoid` (steer around walls), `dodge` (steer around moving agents).
-* **`facing <dest>`** — optional; decouples which way the bot faces from the way it travels.
+* **`facing <dest>`**: optional; decouples which way the bot faces from the way it travels.
 * **Examples:**
 
   ```
@@ -364,11 +364,11 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 **Usage:** `rc bot cfg <target> [<lever> <value>]`
 
-* Sets or lists **per-bot AI levers** — a granular override for one bot/group on top of the global default. Only affects bots whose AI is configurable (`StabbingDummy`, `RiposteDummy`, `Dueling`); others are skipped with a message.
+* Sets or lists per-bot AI levers, a granular override for one bot or group on top of the global default. It only affects bots whose AI is configurable (`StabbingDummy`, `RiposteDummy`, and the `Dueling` tiers); others are skipped with a message.
 * **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
-* With `<lever> <value>` — set that lever on the matching bots.
-* Without a lever — list the matching bots' current levers and values.
-* A lever's default comes from `globalAI` — see **[Bot AI Types](#bot-ai-types)**.
+* With `<lever> <value>`: set that lever on the matching bots.
+* Without a lever: list the matching bots' current levers and values.
+* A lever's default comes from `globalAI`: see **[Bot AI Types](#bot-ai-types)**.
 * **Examples:**
 
   ```
@@ -379,10 +379,10 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 ### `probe` & `act` *(dev tools)*
 
-Diagnostic helpers used while building and validating AI behaviour — no effect on normal drills.
+Diagnostic helpers used while building and validating AI behaviour. They have no effect on normal drills.
 
-* **`rc bot probe <playerId|me> [on|off]`** — logs a player's melee packet actions and hurt events to the server log (to learn the input tokens and timings). Toggles if `on|off` is omitted. Works on any player, human or bot.
-* **`rc bot act <playerId> <actionToken> [argument]`** — fires a single raw `carbonPlayers` playerAction at a player/bot (e.g. `MeleeBlockHigh`, `MeleeStrikeHigh`, `ExecuteMeleeWeaponStrike`). No AI required.
+* **`rc bot probe <playerId|me> [on|off]`**: logs a player's melee packet actions and hurt events to the server log (to learn the input tokens and timings). Toggles if `on|off` is omitted. Works on any player, human or bot.
+* **`rc bot act <playerId> <actionToken> [argument]`**: fires a single raw `carbonPlayers` playerAction at a player/bot (e.g. `MeleeBlockHigh`, `MeleeStrikeHigh`, `ExecuteMeleeWeaponStrike`). No AI required.
 
 ---
 
@@ -392,22 +392,20 @@ Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot 
 
 | AI | Behaviour |
 | --- | --- |
-| `None` | Does nothing — stands where it spawned. |
+| `None` | Does nothing. Stands where it spawned. |
 | `Manual` | Manually driven with `rc bot move` (a movement test harness: seek, arrive, flee, pursue, evade, wander, face…). Issues no orders on its own. |
-| `StabbingDummy` | Static training dummy — stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking/attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
-| `RiposteDummy` | Reactive melee — stands its ground, blocks, and only **counters once provoked** (never throws first). A patient sparring partner: walk up and attack it, it blocks and ripostes. |
-| `DuelingEasy` / `DuelingNormal` / `Dueling` | Sentry melee at three **difficulty tiers** — **passive** (reads and blocks the closest player in range) until a player attacks it and it **blocks the hit**; then it locks onto that attacker and fights to the death, returning to passive when the target dies (a replacement starts passive again). They only respond to **human players** (`ignoreBots`). The tiers differ only in reaction speed: `DuelingEasy` is sluggish/beatable, `DuelingNormal` is human, and plain `Dueling` is the hardest — instant (superhuman) blocks and ripostes. |
+| `StabbingDummy` | Static training dummy. Stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking and attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
+| `RiposteDummy` | Reactive melee. Stands its ground, blocks, and only counters once provoked, never throwing first. A patient sparring partner: walk up and attack it, and it blocks and ripostes. |
+| `DuelingEasy` / `DuelingNormal` / `Dueling` | Sentry melee at three difficulty tiers. Each stays passive, reading and blocking the closest player in range, until a player attacks it and it blocks the hit; then it locks onto that attacker and fights to the death, returning to passive when the target dies (a replacement starts passive again). They only respond to human players (`ignoreBots`). The tiers differ only in reaction speed: `DuelingEasy` is sluggish and beatable, `DuelingNormal` is human, and plain `Dueling` is the hardest, with instant blocks and ripostes. |
 
-`RiposteDummy` and the `Dueling*` tiers are **presets of one configurable melee AI** — the same behaviour with different capability toggles (`press` / `riposte` / `move` / `pursue` / `engageOnAttack`) and tuning; the former `MeleeFight`/`MeleeDefend` behaviours are reachable by tuning those levers. `StabbingDummy` is a separate static-stabber AI. Tweak any per bot with `rc bot cfg` (see below).
+`RiposteDummy` and the `Dueling` tiers are presets of one configurable melee AI: the same behaviour with different capability toggles (`press`, `riposte`, `move`, `pursue`, `engageOnAttack`) and tuning. `StabbingDummy` is a separate static-stabber AI. You can tweak any of them per bot with `rc bot cfg`.
 
 ### Configurable AI levers
 
-Some AIs expose named **levers** you can tune. A lever's value resolves in three layers:
+Some AIs expose named **levers** you can tune. A lever starts at its built-in default, is overridden by the global default if one is set, and is overridden again by a per-bot value.
 
-> **built-in default ← global default (settable) ← per-bot override (settable)**
-
-* **Per-bot override** — `rc bot cfg <target> <lever> <value>` (that bot/group only). List with `rc bot cfg <target>`.
-* **Global default** — `rc set globalAI <AiType> <lever> <value>`; new bots of that AI start from it. Read with `rc get globalAI <AiType> <lever>`, and persist it in a rotation config with the `SetGlobalAi` config variable.
+* **Per-bot override**: `rc bot cfg <target> <lever> <value>` (that bot/group only). List with `rc bot cfg <target>`.
+* **Global default**: `rc set globalAI <AiType> <lever> <value>`; new bots of that AI start from it. Read with `rc get globalAI <AiType> <lever>`, and persist it in a rotation config with the `SetGlobalAi` config variable.
 
 Changing a global default affects **newly created** bots of that AI, not ones already spawned.
 
@@ -418,7 +416,7 @@ Changing a global default affects **newly created** bots of that AI, not ones al
 | `stabInterval` | float > 0 (seconds) | `1.7` | Delay between stabs. |
 | `stabDirection` | `Random` / `High` / `Low` / `Alternate` | `Random` | Which way each stab is thrown (e.g. `High` to drill high blocks). |
 
-*Example — a slow, high-only dummy:*
+*Example: a slow, high-only dummy.*
 
 ```
 rc bot summon Defending ArmyLineInfantry
@@ -438,23 +436,22 @@ rc bot cfg <id> stabDirection High
 | `press` | `false` | `true` | Throw the first blow when the enemy isn't threatening. |
 | `riposte` | `true` | `true` | Counter after the guard absorbs a hit. |
 | `move` | `false` | `true` | Hold/adjust melee spacing vs. stand its ground. |
-| `pursue` | `false` | `true` | Advance toward a target that's too far vs. only hold/back off. `false` lets a player back away and **disengage** instead of being followed. |
-| `stickyTarget` | `false` | `false` | Keep one target while valid vs. re-pick the **closest** each tick. |
-| `targetRange` | `4` | `3` | Only engage players within this many metres (`0` = unlimited); drops the target past it. For `Dueling*` this is the passive read/provoke range. |
-| `engageOnAttack` | `false` | `true` | Start **passive** (block only, `press`/`riposte`/`pursue` suppressed) and engage only a player whose attack it **blocks** (a hit aimed at it, not just anyone swinging nearby), fighting that target until it dies — then back to passive. |
-| `ignoreBots` | `false` | `true` | Only target human players (skip bots). The `Dueling` tiers ignore bots so they focus the player and aren't provoked by other bots. |
+| `pursue` | `false` | `true` | Advance toward a target that's too far, versus only holding or backing off. `false` lets a player back away and disengage instead of being followed. |
+| `stickyTarget` | `false` | `false` | Keep one target while valid, versus re-picking the closest each tick. |
+| `targetRange` | `3` | `3` | Only engage players within this many metres (`0` = unlimited); drops the target past it. For the `Dueling` tiers this is the passive read and provoke range. |
+| `engageOnAttack` | `false` | `true` | Start passive (block only, with `press`, `riposte`, and `pursue` suppressed) and engage only a player whose attack it blocks, a hit aimed at it rather than anyone swinging nearby, fighting that target until it dies, then returning to passive. |
 
-**Difficulty** — the reaction levers that separate the three `Dueling` tiers (`seconds ≥ 0`):
+**Difficulty**: the reaction levers that separate the three `Dueling` tiers (`seconds ≥ 0`):
 
 | Lever | `RiposteDummy` | `DuelingEasy` | `DuelingNormal` | `Dueling` | Meaning |
 | --- | --- | --- | --- | --- | --- |
-| `blockReactionMin` | `0.1` | `0.3` | `0.1` | `0` | Min delay between reading an attack and raising the guard. `0` = instant/superhuman. **Main difficulty knob.** |
-| `blockReactionMax` | `0.2` | `0.5` | `0.2` | `0` | Max of that delay (each block picks a random value in the min–max range). |
+| `blockReactionMin` | `0.1` | `0.3` | `0.1` | `0` | Min delay between reading an attack and raising the guard, where `0` is instant. This is the main difficulty knob. |
+| `blockReactionMax` | `0.2` | `0.5` | `0.2` | `0` | Max of that delay. Each block picks a random value in the min to max range. |
 | `riposteReactionMin` | `0` | `0.2` | `0` | `0` | Min delay between a block landing and the counter. |
 | `riposteReactionMax` | `0.5` | `0.8` | `0.5` | `0` | Max of that delay. |
 | `attackReadBeat` | `0.6` | `0.9` | `0.6` | `0.3` | Extra randomised beat added to the attack cooldown (pacing; lower = presses faster). |
 
-**Shared tuning** — same defaults across all these presets (`seconds ≥ 0` or `metres`, floats):
+**Shared tuning**: same defaults across all these presets (`seconds ≥ 0` or `metres`, floats):
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
@@ -463,13 +460,14 @@ rc bot cfg <id> stabDirection High
 | `offensiveRangeVariance` | `0.1` | Random jitter added on top of `offensiveRange`. |
 | `defensiveRange` | `2.0` | Reading spacing it guards from (metres). |
 | `defensiveRangeVariance` | `0.4` | Random jitter added on top of `defensiveRange`. |
-| `attackRange` | `2.0` | How close before it commits a stab (metres). |
-| `ignoreTeam` | `true` | Target **any** player regardless of faction (`false` = enemies only). Defaults `true` so you don't have to be on the opposing team to use a bot. |
-| `passiveRange` | `0.6` | `Dueling*` only: the hold distance while **waiting** (passive). Small so it stands its ground instead of backing off ~`defensiveRange` from an approaching player; it uses `defensiveRange` once engaged. |
+| `attackRange` | `2.0` | How close before a press attack (throwing first) commits a stab, in metres. A riposte ignores this and always throws at the target, so a stationary bot still counters an attacker who backed off. |
+| `ignoreTeam` | `true` | Target any player regardless of faction (`false` = enemies only). Defaults to `true` so you don't have to be on the opposing team to use a bot. |
+| `ignoreBots` | `true` | Target only human players, skipping bots. Defaults to `true` so bots focus the player and don't provoke each other. |
+| `passiveRange` | `0.6` | `Dueling` tiers only: the hold distance while waiting. It's small so the bot stands its ground instead of backing off to `defensiveRange` from an approaching player; it uses `defensiveRange` once engaged. |
 
-**Attacker-lock** (automatic, no lever): once a player within melee range begins a strike, the bot locks onto them through the exchange — including its riposte — regardless of who else is closer, so it can't be pulled off an attacker mid-fight.
+**Attacker-lock** (automatic, no lever): once a player within melee range begins a strike, the bot locks onto them through the exchange, including its riposte, regardless of who else is closer, so it can't be pulled off an attacker mid-fight.
 
-*Example — pick a difficulty out of the box, or fine-tune one lever:*
+*Example: pick a difficulty out of the box, or fine-tune one lever.*
 
 ```
 rc bot summon Defending ArmyLineInfantry DuelingEasy
@@ -482,76 +480,76 @@ rc bot cfg <id> blockReactionMax 0.6   # make this one even slower
 
 *(Defaults shown are tuned for Palisade Arena A1.)*
 
-* **ArenaCorner1** — x,z coordinate of the 1st corner of the arena play area.
+* **ArenaCorner1**: x,z coordinate of the 1st corner of the arena play area.
 
   * **args:** `x z` (floats) or none (uses player position)
   * **default:** Not set
-* **ArenaCorner2** — x,z coordinate of the 2nd corner of the arena play area.
+* **ArenaCorner2**: x,z coordinate of the 2nd corner of the arena play area.
 
   * **args:** `x z` (floats) or none (uses player position)
   * **default:** Not set
-* **xvxDistance** — Distance between attacking and defending faction lines for `xvx`.
+* **xvxDistance**: Distance between attacking and defending faction lines for `xvx`.
 
   * **args:** `distance (float)`
   * **default:** `20`
-* **xvxSpacing** — Space between each player on a line for `xvx`.
+* **xvxSpacing**: Space between each player on a line for `xvx`.
 
   * **args:** `distance (float)`
   * **default:** `2`
-* **xvxStrategy** — Player selection strategy for `xvx`.
+* **xvxStrategy**: Player selection strategy for `xvx`.
 
   * **args:** `Random | Next | Any | Repeat`
   * **default:** `Random`
-* **groupfightDistance** — Distance between attacking and defending faction lines for `groupfight`.
+* **groupfightDistance**: Distance between attacking and defending faction lines for `groupfight`.
 
   * **args:** `distance (float)`
   * **default:** `25`
-* **groupfightSpacing** — Space between each player on a line for `groupfight`.
+* **groupfightSpacing**: Space between each player on a line for `groupfight`.
 
   * **args:** `distance (float)`
   * **default:** `2`
-* **groupfightStrategy** — Player selection strategy for `groupfight`.
+* **groupfightStrategy**: Player selection strategy for `groupfight`.
 
   * **args:** `Random | Repeat`
   * **default:** `Random`
-* **openMeleeSpacing** — Minimum distance players can spawn from each other for `openmelee`.
+* **openMeleeSpacing**: Minimum distance players can spawn from each other for `openmelee`.
 
   * **args:** `distance (float)`
   * **default:** `1.5`
-* **openMeleeOffset** — Minimum spawn distance from the arena edges in `openmelee`.
+* **openMeleeOffset**: Minimum spawn distance from the arena edges in `openmelee`.
 
   * **args:** `distance (float)`
   * **default:** `7`
-* **Orientation** — Direction two lines spawn facing each other.
+* **Orientation**: Direction two lines spawn facing each other.
 
   * **args:** `degree (int)` or `NorthSouth | EastWest | SouthNorth | WestEast | Random`
   * **default:** `90` (NorthSouth)
-* **botDefaultAi** — Default AI behaviour assigned to bots that do not specify one inline.
+* **botDefaultAi**: Default AI behaviour assigned to bots that do not specify one inline.
 
   * **args:** `None | Manual | StabbingDummy | RiposteDummy | DuelingEasy | DuelingNormal | Dueling` (see [Bot AI Types](#bot-ai-types))
   * **default:** `None`
-* **botDefaultDeathPolicy** — Default death policy assigned to bots that do not specify one inline.
+* **botDefaultDeathPolicy**: Default death policy assigned to bots that do not specify one inline.
 
   * **args:** `None | Kick | Replace`
   * **default:** `Kick`
-* **botKickDelay** — Seconds to wait after a bot dies before kicking it (allows the kill to register).
+* **botKickDelay**: Seconds to wait after a bot dies before kicking it (allows the kill to register).
 
   * **args:** `seconds (float)`
   * **default:** `2`
-* **botReplaceDelay** — Seconds to wait after kicking a bot before re‑spawning it (clears the slot).
+* **botReplaceDelay**: Seconds to wait after kicking a bot before re‑spawning it (clears the slot).
 
   * **args:** `seconds (float)`
   * **default:** `0.5`
-* **globalAI** — Global **default** value for a configurable AI lever (per-bot overrides are the separate `rc bot cfg` command). Reads/writes one lever at a time. See [Configurable AI levers](#configurable-ai-levers).
+* **globalAI**: Global **default** value for a configurable AI lever (per-bot overrides are the separate `rc bot cfg` command). Reads/writes one lever at a time. See [Configurable AI levers](#configurable-ai-levers).
 
-  * **set args:** `<AiType> <lever> <value>` — e.g. `rc set globalAI StabbingDummy stabInterval 2.5`
-  * **get args:** `<AiType> <lever>` — e.g. `rc get globalAI StabbingDummy stabInterval`
+  * **set args:** `<AiType> <lever> <value>`: e.g. `rc set globalAI StabbingDummy stabInterval 2.5`
+  * **get args:** `<AiType> <lever>`: e.g. `rc get globalAI StabbingDummy stabInterval`
   * **default:** each AI's built-in lever values (e.g. `StabbingDummy stabInterval` = `1.7`)
-* **lineBotCount** — Default number of bots in a `summonLine` or `spawnLine` when count is not specified inline.
+* **lineBotCount**: Default number of bots in a `summonLine` or `spawnLine` when count is not specified inline.
 
   * **args:** `count (int, > 0)`
   * **default:** `10`
-* **lineSpacing** — Lateral spacing in metres between bots in a line. Set so bots will be shoulder to shoulder.
+* **lineSpacing**: Lateral spacing in metres between bots in a line. Set so bots will be shoulder to shoulder.
 
   * **args:** `metres (float, > 0)`
   * **default:** `0.55`
@@ -566,37 +564,37 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 ### General
 
-* **EnableDebugLogging** — `true | false`
-* **EnableAdminOnly** — `true | false`
+* **EnableDebugLogging**: `true | false`
+* **EnableAdminOnly**: `true | false`
 
 ### Arena
 
-* **SetArena** — `(x,z),(x,z)`
-* **AddArena** — `(x,z),(x,z)`
-* **SetArenaCorner1** — `x,z`
-* **SetArenaCorner2** — `x,z`
+* **SetArena**: `(x,z),(x,z)`
+* **AddArena**: `(x,z),(x,z)`
+* **SetArenaCorner1**: `x,z`
+* **SetArenaCorner2**: `x,z`
 
 ### Drill
 
-* **SetXvXDistance** — `distance(float)`
-* **SetXvXSpacing** — `distance(float)`
-* **SetXvXStrategy** — `Random | Next | Any | Repeat`
-* **SetGroupfightDistance** — `distance(float)`
-* **SetGroupfightSpacing** — `distance(float)`
-* **SetGroupfightStrategy** — `Random | Repeat`
-* **SetOpenMeleeSpacing** — `distance(float)`
-* **SetOpenMeleeOffset** — `distance(float)`
-* **SetOrientation** — `degree(int)` **or** `NorthSouth | EastWest | SouthNorth | WestEast | Random`
+* **SetXvXDistance**: `distance(float)`
+* **SetXvXSpacing**: `distance(float)`
+* **SetXvXStrategy**: `Random | Next | Any | Repeat`
+* **SetGroupfightDistance**: `distance(float)`
+* **SetGroupfightSpacing**: `distance(float)`
+* **SetGroupfightStrategy**: `Random | Repeat`
+* **SetOpenMeleeSpacing**: `distance(float)`
+* **SetOpenMeleeOffset**: `distance(float)`
+* **SetOrientation**: `degree(int)` **or** `NorthSouth | EastWest | SouthNorth | WestEast | Random`
 
 ### Bot
 
-* **SetBotDefaultAi** — `None | Manual | StabbingDummy | RiposteDummy | DuelingEasy | DuelingNormal | Dueling`
-* **SetBotDefaultDeathPolicy** — `None | Kick | Replace`
-* **SetBotKickDelay** — `seconds(float)`
-* **SetBotReplaceDelay** — `seconds(float)`
-* **SetGlobalAi** — `<AiType>,<lever>,<value>`
+* **SetBotDefaultAi**: `None | Manual | StabbingDummy | RiposteDummy | DuelingEasy | DuelingNormal | Dueling`
+* **SetBotDefaultDeathPolicy**: `None | Kick | Replace`
+* **SetBotKickDelay**: `seconds(float)`
+* **SetBotReplaceDelay**: `seconds(float)`
+* **SetGlobalAi**: `<AiType>,<lever>,<value>`
 
-  Sets a global **default** for one configurable AI lever at map load — the persistent form of `rc set globalAI`. Repeat it for each lever. Per-bot `rc bot cfg` still overrides. (Spaces also work in place of commas.)
+  Sets a global default for one configurable AI lever at map load, the persistent form of `rc set globalAI`. Repeat it for each lever. Per-bot `rc bot cfg` still overrides. Spaces also work in place of commas.
 
   *Examples:*
 
@@ -607,17 +605,17 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 ### Line
 
-* **SetLineBotCount** — `count(int)`
-* **SetLineSpacing** — `metres(float)`
-* **SpawnLine** — `x,z,rotation[,count][,faction][,class][,ai][,death][,name[,regtag[,uniformId]]]`
+* **SetLineBotCount**: `count(int)`
+* **SetLineSpacing**: `metres(float)`
+* **SpawnLine**: `x,z,rotation[,count][,faction][,class][,ai][,death][,name[,regtag[,uniformId]]]`
 
   Schedules a shoulder‑to‑shoulder bot line to spawn when the round begins. Specify it multiple times for multiple lines (e.g. two opposing lines). Mirrors the `rc spawnLine` grammar, with map‑load defaults instead of a caller:
-  * `x,z,rotation` — required. World position and facing (degrees from North).
-  * `count` — optional. Defaults to `lineBotCount`.
-  * `faction` — optional. `attacking` (default), `defending`, or a faction name (e.g. `French`). `attacking`/`defending` resolve against the live round at spawn time, so the same config works across maps.
-  * `class` — optional. Defaults to `ArmyLineInfantry`.
-  * `ai,death` — optional. Default to `botDefaultAi` / `botDefaultDeathPolicy`.
-  * `name,regtag,uniformId` — optional identity extras.
+  * `x,z,rotation`: required. World position and facing (degrees from North).
+  * `count`: optional. Defaults to `lineBotCount`.
+  * `faction`: optional. `attacking` (default), `defending`, or a faction name (e.g. `French`). `attacking`/`defending` resolve against the live round at spawn time, so the same config works across maps.
+  * `class`: optional. Defaults to `ArmyLineInfantry`.
+  * `ai,death`: optional. Default to `botDefaultAi` / `botDefaultDeathPolicy`.
+  * `name,regtag,uniformId`: optional identity extras.
 
   *Examples:*
 

@@ -4,9 +4,9 @@ namespace MDS.Systems
 {
     public enum MoveOrderKind { Stop, Seek, Arrive, Flee, Pursue, Evade, Face, FacePoint, Wander }
 
-    // A destination for a point-based movement order: either a fixed world point, or a player resolved to
-    // its LIVE position each tick (so a bot can chase / flee / track a moving player). Resolving a player
-    // to a point is a harness/decision concern - the pure MovementBehaviors only ever see the Vector2.
+    // A destination for a point-based movement order: either a fixed world point, or a player resolved to its
+    // live position each tick, so a bot can chase, flee, or track a moving player. Resolving a player to a point
+    // is a decision-layer concern; the pure MovementBehaviors only ever see the Vector2.
     public struct MoveTarget
     {
         public bool IsPlayer;
@@ -25,7 +25,7 @@ namespace MDS.Systems
         public MoveOrderKind Kind;
         public MoveTarget Target;        // Seek / Arrive / Flee / Pursue / Evade / FacePoint
         public float Heading;            // Face: degrees from North
-        public MoveTarget? FaceTarget;   // optional decoupled facing for translating orders (null => face travel)
+        public MoveTarget? FaceTarget;   // optional decoupled facing for translating orders (null means face travel direction)
         public bool Separate;            // blend in Separation (spread apart from nearby bots)
         public bool Avoid;               // blend in Obstacle Avoidance (steer around walls)
         public bool Dodge;               // blend in Collision Avoidance (steer around moving agents)

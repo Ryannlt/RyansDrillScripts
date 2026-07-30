@@ -5,9 +5,9 @@ using MDS.Systems;
 namespace MDS.ConsoleCommands
 {
     // rc bot summon [faction class] [ai] [death] [name [regtag [uniformId]]] [at <playerId>]
-    // Spawns a single bot (no count - multiple would stack on one spot) then teleports it to the caller.
-    // 'at <playerId>' places it at that player instead - the usable route while in free roam, where the
-    // server never learns the caller's own position. Faction/class still default to the CALLER's.
+    // Spawns a single bot (no count, since multiple would stack on one spot) then teleports it to the caller.
+    // 'at <playerId>' places it at that player instead, the usable route while in free roam, where the server
+    // never learns the caller's own position. Faction and class still default to the caller's.
     public class SummonSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Summon;

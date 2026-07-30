@@ -17,11 +17,11 @@ namespace MDS.ConsoleCommands
     //   facepoint <dest>                          - rotate in place to face a point/player
     //   face      <deg>                           - rotate in place to a heading (degrees from North)
     //   stop                                      - halt movement
-    // <dest> = 'x z' | <playerId> | me (a player/me dest is tracked live). [flags] are blended corrective
-    // steering, any combination: 'separate' (spread apart from bots), 'avoid' (steer around walls),
-    // 'dodge' (steer around moving agents). Optional 'facing <dest>' DECOUPLES facing from travel.
-    // <bots> selects WHICH bots get the order (playerId|all|attacking|defending|faction). Orders only apply
-    // to bots already on the Manual AI ('rc bot setBotAi <bots> Manual'); bots on other AIs are untouched.
+    // <dest> is 'x z', a <playerId>, or me (a player or me dest is tracked live). [flags] are blended corrective
+    // steering, any combination: 'separate' (spread apart from bots), 'avoid' (steer around walls), 'dodge' (steer
+    // around moving agents). An optional 'facing <dest>' decouples facing from travel. <bots> selects which bots
+    // get the order (playerId, all, attacking, defending, or a faction). Orders only apply to bots already on the
+    // Manual AI ('rc bot setBotAi <bots> Manual'); bots on other AIs are untouched.
     public class MoveSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Move;

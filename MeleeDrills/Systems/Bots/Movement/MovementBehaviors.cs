@@ -2,14 +2,14 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // Turns steering into a BotIntent. Assemble localizes a world velocity (from the Steering layer,
-    // possibly blended) into the input axis + coupled facing. The remaining behaviors here are the ones
-    // that don't fit the pure-velocity model: Wander (stateful), Face/FacePoint (rotation only), Stop.
-    // No engine I/O - BotController.ApplyIntent issues commands - so these stay unit-testable.
+    // Turns steering into a BotIntent. Assemble localises a world velocity (from the Steering layer, possibly
+    // blended) into the input axis and coupled facing. The other behaviors here are the ones that don't fit the
+    // pure-velocity model: Wander (stateful), Face and FacePoint (rotation only), and Stop. There's no engine
+    // I/O, since BotController.ApplyIntent issues the commands, so these stay unit-testable.
     //
-    // A halted result returns a ZERO axis (an explicit stop), never BotIntent.Idle: a null axis means
-    // "issue no axis command", leaving the previously-sent axis in place - the bot would keep moving. Run
-    // is a sticky mode set elsewhere (once), so it is left null here.
+    // A halt returns a zero axis, an explicit stop, never BotIntent.Idle: a null axis means "issue no axis
+    // command", which leaves the previously-sent axis in place and the bot would keep moving. Run is a sticky
+    // mode set elsewhere once, so it is left null here.
     public static class MovementBehaviors
     {
         private const float EpsilonSqr = 0.0001f;
@@ -42,11 +42,11 @@ namespace MDS.Systems
             return new BotIntent { MoveAxis = axis, LookHeading = MovementSolver.HeadingOf(dir) };
         }
 
-        // Wander: smooth, undirected roaming (Millington's steering wander), as a WORLD VELOCITY so it can be
-        // blended with corrective behaviors (obstacle/collision avoidance). A target rides the rim of a circle
-        // projected ahead of the bot; that rim point drifts by a small random amount each tick and the bot
-        // Seeks it - producing gentle continuous turns rather than jittery noise. STATEFUL: the caller owns
-        // 'wanderAngle' (passed by ref) so it persists across ticks. Uses UnityEngine.Random, so unlike the
+        // Wander: smooth, undirected roaming (Millington's steering wander), returned as a world velocity so it
+        // can be blended with corrective behaviors like obstacle and collision avoidance. A target rides the rim
+        // of a circle projected ahead of the bot; that rim point drifts by a small random amount each tick and the
+        // bot seeks it, producing gentle continuous turns rather than jittery noise. It is stateful: the caller
+        // owns wanderAngle (passed by ref) so it persists across ticks. It uses UnityEngine.Random, so unlike the
         // pure Steering behaviors it is not deterministic. Assemble it (or blend first) to get a BotIntent.
         public static Vector2 WanderVelocity(BotPose pose, ref float wanderAngle, float deltaTime) =>
             WanderVelocity(pose, ref wanderAngle, DefaultWanderOffset, DefaultWanderRadius, DefaultWanderRate, DefaultWanderDecay, deltaTime);
@@ -65,7 +65,7 @@ namespace MDS.Systems
             Vector2 rim = MovementSolver.DirectionFromHeading(pose.Heading + wanderAngle);
             Vector2 target = circleCenter + rim * radius;
 
-            return Steering.Seek(pose, target); // velocity toward the wandering target (offset > radius => always ahead)
+            return Steering.Seek(pose, target); // velocity toward the wandering target (offset > radius keeps it always ahead)
         }
 
         // Triangular random in [-1, 1], biased toward 0 (Millington's randomBinomial).

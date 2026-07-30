@@ -9,15 +9,15 @@ namespace MDS.ConsoleCommands
 {
     // Parses the shared positional spawn grammar used by 'spawn' and 'summon':
     //   [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // - faction/class: provide both or neither; omitted => default to the caller's faction/class.
+    // - faction/class: provide both or neither; omitted means default to the caller's faction/class.
     //   faction accepts attacking/defending (resolved to the round's factions) or a FactionCountry name.
-    // - ai/death: omitted => config defaults (botDefaultAi / botDefaultDeathPolicy); provide inline to override.
+    // - ai/death: omitted means config defaults (botDefaultAi / botDefaultDeathPolicy); provide inline to override.
     // - name/regtag/uniformId: require an explicit faction+class.
     // Strict positional order:
     //   [count] [faction [class]] [ai] [death] [name [regtag [uniformId]]]
-    // - Neither faction nor class   -> both default to caller's.
-    // - Faction only (no class)     -> faction explicit, class defaults to caller's.
-    // - Both faction and class      -> both explicit.
+    // - Neither faction nor class: both default to the caller's.
+    // - Faction only (no class): faction explicit, class defaults to the caller's.
+    // - Both faction and class: both explicit.
     // The ai and death slots, if present, MUST parse as a valid AI / death policy - a wrong token
     // errors rather than being silently taken as a name.
     public class BotSpawnArgs

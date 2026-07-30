@@ -8,7 +8,7 @@ namespace MDS.ConfigVariables
     //   e.g. MDS:SetGlobalAi:StabbingDummy,stabInterval,2.5
     // Spaces also work (StabbingDummy stabInterval 2.5) since both delimiters are accepted.
     // Statics reset each map, so this re-applies the default every map load; per-bot 'rc bot cfg' still overrides.
-    // Like the live command, the value string is not type-checked here - the AI validates it when it reads it.
+    // Like the live command, the value string is not type-checked here; the AI validates it when it reads it.
     public class SetGlobalAi : IConfigVariables
     {
         public ConfigCommandEnum CommandName => ConfigCommandEnum.SetGlobalAi;
