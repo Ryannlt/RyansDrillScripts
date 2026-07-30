@@ -15,13 +15,22 @@ namespace MDS.Systems
     //   riposte (counter after our guard absorbs a committed attack), and
     //   move    (hold/adjust melee spacing vs. stand our ground) -
     // bundled into named defaults by DefaultLeversFor:
-    //   MeleeDefend = block only (press off, riposte off, move on) - a target to practise attacks against.
+    //   MeleeDefend = block only (press off, riposte off, move on, pursue off) - a target to practise attacks
+    //                 against that holds ground and blocks but won't chase, so you can back off to disengage.
     //   MeleeFight  = press on, riposte on, move on - crowds in and trades.
     //   Sparring    = press off, riposte on, move off - stands its ground, blocks, and only counters once
-    //                 provoked ("wait for someone to initiate").
+    //                 provoked ("wait for someone to initiate"), engaging only the closest player in range.
+    //   Guardian    = passive until attacked (engageOnAttack): reads/blocks the nearest player in range, then on
+    //                 being struck locks onto that attacker and fights (full MeleeFight) until it or the attacker
+    //                 dies, then returns to passive. A Replace replacement starts passive again.
     // Every tuning value is a lever (IConfigurableAi): 'rc bot cfg <id> <lever> <value>' per bot, defaulting
     // from globalAI. The strike MECHANIC constants (windup/recovery/commit timings) stay fixed - they encode how
     // the engine plays a stab out (measured), not difficulty, so exposing them would just let someone break it.
+    //
+    // Targeting is lever-driven too (see ResolveTarget): targetRange gates who it engages, ignoreTeam decides
+    // whether it cares about faction, and stickyTarget picks "hold one foe" vs "closest each tick". On top of
+    // that, an automatic attacker-lock keeps it on whoever is mid-strike through the exchange. An ITargetableAi
+    // pin lets a future supervisor override the choice entirely.
     //
     // A raw MeleeStrike token latches an auto-cycling attack loop, so a strike is a SHORT held chamber (ONE
     // MeleeStrike) released by a single ExecuteMeleeWeaponStrike (which also stops the cycle). See StepAttack.
@@ -37,12 +46,14 @@ namespace MDS.Systems
         private const float StrikeCommitWindow = 0.5f; // after releasing a strike, don't block or we cancel our own swing before it lands
         private const float FirstStrikeCommitBonus = 0.4f; // extra commit time when WE threw first - back our own stab instead of flinching into a guard
         private const float MinBlockHold = 0.35f;      // keep a raised guard up at least this long so it reads/animates
+        private const float AimOffset = 0.3f;          // sideways aim shift while striking to re-centre a right-hand stab (metres); fixed - no practical reason to tune
 
         // ---- Fixed movement feel (advanced; kept const for now, promote to levers later) ----
         private const float RangeTolerance = 0.3f;     // slop band around the hold range where the bot just stands
         private const float BackoffThrottle = 1.0f;    // back off at FULL speed so an approaching attacker can't just fill the gap
         private const float MoveChangeDelay = 0.2f;    // reaction beat before adopting a CLOSER hold range (advancing); retreating is immediate
         private const float MoveHysteresis = 0.5f;     // ignore range jitter smaller than this when deciding "advance"
+        private const float StrikerLockRange = 3f;     // attacker-lock only triggers for strikers within this (when targetRange is unlimited) - a distant swing at someone else shouldn't grab us
 
         // ---- Difficulty / personality levers (IConfigurableAi; defaults per preset in DefaultLeversFor) ----
         private float _offensiveBase, _offensiveVar;   // close spacing to press/attack from (base + jitter)
@@ -52,12 +63,18 @@ namespace MDS.Systems
         private float _riposteReactionMin, _riposteReactionMax; // human reaction beat between a block landing and the counter
         private float _riposteWindow;                  // how long the post-block counter stays available
         private float _blockReactionMin, _blockReactionMax;     // reaction beat between reading an attack and raising the guard (0 = instant)
-        private float _aimOffset;                      // sideways aim shift while striking to re-centre a right-hand stab (metres)
 
         // Capability toggles (levers).
         private bool _press;      // throw the first blow when the enemy isn't threatening
         private bool _riposte;    // counter after our guard absorbs a committed attack
         private bool _move;       // drive melee spacing (false = stand our ground)
+        private bool _pursue;     // advance toward a target that's too far (false = hold ground, let it walk away)
+        private bool _engageOnAttack; // start PASSIVE (block only); only fight a player who attacks us, and only until they die
+
+        // Targeting levers (see ResolveTarget).
+        private float _targetRange;   // only acquire candidates within this range (<= 0 = unlimited)
+        private bool _ignoreTeam;     // target any player regardless of faction (else enemies only)
+        private bool _stickyTarget;   // keep the current target while valid (else re-pick the closest each tick)
 
         private readonly BotAiEnum _aiType;
         private float _offensiveRange;                // close spacing actually in use (re-rolled for jitter)
@@ -66,7 +83,11 @@ namespace MDS.Systems
         private float _advanceWantedSince = -1f;      // realtime we first wanted to advance to a closer range (-1 = not)
 
         private int? _assignedTargetId;       // higher-layer pin (ITargetableAi); preferred over nearest while alive
-        private int? _targetId;               // sticky target; re-acquired to nearest enemy when it drops
+        private int? _targetId;               // last resolved target (sticky or closest, per _stickyTarget)
+        private int? _lockTargetId;           // attacker-lock: a mid-strike player we stick to through the exchange
+        private float _lockUntil;             // realtime the attacker-lock expires
+        private bool _engaged;                // engageOnAttack runtime: provoked and fighting (vs passive). NOT inherited - a Replace replacement starts passive.
+        private int? _engagedTargetId;        // engageOnAttack runtime: the attacker we fight until it (or we) die
         private bool _stancePending = true;   // issue EnableCombatStance once, on the first spawned tick
         private bool _runPending = true;      // establish the sticky run toggle once, on first engagement
         private string _blockToken;           // the block playerAction we're currently holding (null = not blocking)
@@ -109,20 +130,32 @@ namespace MDS.Systems
             var levers = new List<(string, string)>
             {
                 ("offensiveRange", "0.7"), ("offensiveRangeVariance", "0.1"),
-                ("defensiveRange", "2.3"), ("defensiveRangeVariance", "0.4"),
-                ("attackRange", "1.7"), ("attackReadBeat", "0.6"),
-                ("riposteReactionMin", "0"), ("riposteReactionMax", "0.1"), ("riposteWindow", "0.6"),
-                ("blockReactionMin", "0"), ("blockReactionMax", "0"),   // 0 = instant guard (keeps the tuned feel)
-                ("aimOffset", "0.3"),
+                ("defensiveRange", "2.0"), ("defensiveRangeVariance", "0.4"),
+                ("attackRange", "2.0"), ("attackReadBeat", "0.6"),
+                ("riposteReactionMin", "0"), ("riposteReactionMax", "0.5"), ("riposteWindow", "0.6"),
+                ("blockReactionMin", "0.1"), ("blockReactionMax", "0.2"), // a human-like beat before the guard goes up
+                ("ignoreTeam", "on"),                                   // target anyone by default (drill utility - no need to be on the opposing faction)
             };
             switch (aiType)
             {
                 case BotAiEnum.MeleeFight:
-                    levers.Add(("press", "on"));  levers.Add(("riposte", "on"));  levers.Add(("move", "on"));  break;
+                    levers.Add(("press", "on"));  levers.Add(("riposte", "on"));  levers.Add(("move", "on")); levers.Add(("pursue", "on"));
+                    levers.Add(("targetRange", "0")); levers.Add(("stickyTarget", "on")); levers.Add(("engageOnAttack", "off")); break;
                 case BotAiEnum.Sparring:
-                    levers.Add(("press", "off")); levers.Add(("riposte", "on"));  levers.Add(("move", "off")); break;
+                    // Only engages players who come close, faces the closest, and gives up when they leave.
+                    levers.Add(("press", "off")); levers.Add(("riposte", "on"));  levers.Add(("move", "off")); levers.Add(("pursue", "off"));
+                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "off")); levers.Add(("engageOnAttack", "off")); break;
+                case BotAiEnum.Guardian:
+                    // Passive (block only) until a player in range strikes it; then it locks onto that attacker and
+                    // fights (these fight levers) until the attacker dies, then returns to passive. targetRange is
+                    // the passive read/provoke range; while engaged the target is tracked regardless of range.
+                    levers.Add(("press", "on"));  levers.Add(("riposte", "on"));  levers.Add(("move", "on")); levers.Add(("pursue", "on"));
+                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "off")); levers.Add(("engageOnAttack", "on")); break;
                 default: // MeleeDefend
-                    levers.Add(("press", "off")); levers.Add(("riposte", "off")); levers.Add(("move", "on"));  break;
+                    // Holds ground and blocks but does NOT chase, so a player can back off to disengage; drops
+                    // the target entirely once they're past targetRange.
+                    levers.Add(("press", "off")); levers.Add(("riposte", "off")); levers.Add(("move", "on")); levers.Add(("pursue", "off"));
+                    levers.Add(("targetRange", "6")); levers.Add(("stickyTarget", "on")); levers.Add(("engageOnAttack", "off")); break;
             }
             return levers.ToArray();
         }
@@ -139,7 +172,8 @@ namespace MDS.Systems
                 return new BotIntent { Action = "EnableCombatStance" };
             }
 
-            IPlayer target = ResolveTarget(self);
+            float now = Time.realtimeSinceStartup;
+            IPlayer target = ResolveTarget(self, now);
             if (target?.PlayerObject == null)
             {
                 _attackPhase = AttackPhase.None; // don't resume a stale chamber when a target is reacquired
@@ -149,7 +183,14 @@ namespace MDS.Systems
             Vector3 tp = target.PlayerObject.transform.position;
             Vector2 targetPos = new Vector2(tp.x, tp.z);
             CombatTracker.TryGet(target.PlayerId, out CombatTracker.MeleeState enemy);
-            float now = Time.realtimeSinceStartup;
+
+            // Passive vs. engaged (engageOnAttack): while passive (not yet provoked) suppress attacking and
+            // chasing this tick, so the bot only faces and blocks. ResolveTarget flips _engaged. When
+            // engageOnAttack is off, passive is always false and these are just the raw levers.
+            bool passive = _engageOnAttack && !_engaged;
+            bool press = _press && !passive;
+            bool riposte = _riposte && !passive;
+            bool pursue = _pursue && !passive;
 
             // Face the target's ACTUAL position - leading where it's going made the bot over-rotate/spin up
             // close. While striking, nudge the aim sideways to compensate for the stab coming off the RIGHT of
@@ -162,7 +203,7 @@ namespace MDS.Systems
                 {
                     Vector2 dir = toTarget.normalized;
                     Vector2 botLeft = new Vector2(-dir.y, dir.x); // bot's left; shift aim here to centre a right-hand stab
-                    aimPos = targetPos + botLeft * _aimOffset;
+                    aimPos = targetPos + botLeft * AimOffset;
                 }
             }
             BotIntent intent = new BotIntent { LookHeading = MovementSolver.HeadingTo(pose.Position, aimPos) };
@@ -171,7 +212,7 @@ namespace MDS.Systems
             // our counter, so we hand ourselves a brief window to riposte at once (ignoring the attack cooldown).
             // Priority comes ONLY from the engine's block event - a real absorbed hit, never a guess.
             bool priority = false;
-            if (_riposte)
+            if (riposte)
             {
                 float myBlock = CombatTracker.LastBlockTime(self.PlayerId);
                 if (myBlock > _lastConsumedBlock)
@@ -198,7 +239,7 @@ namespace MDS.Systems
             // "I threw first" read: our windup began before the enemy started theirs, so our stab lands first -
             // commit it rather than bailing to a block. Using IsThreat (not just WindingUp) so an instant
             // reaction-throw still counts as "they went second".
-            bool chamberCommit = (_press || _riposte) && _attackPhase == AttackPhase.Chamber
+            bool chamberCommit = (press || riposte) && _attackPhase == AttackPhase.Chamber
                                  && enemy.IsThreat(now) && _chamberStartedAt <= enemy.WindupTime;
             if (chamberCommit) _threwFirst = true; // we out-timed them - commit harder to this swing (see StepAttack)
 
@@ -239,7 +280,7 @@ namespace MDS.Systems
                 }
                 // Guarding: hold the further DEFENSIVE distance to make space to read, following a circling
                 // player instead of freezing.
-                intent.MoveAxis = _move ? HoldRange(pose, targetPos, MovementRange(false, now)) : Vector2.zero;
+                intent.MoveAxis = _move ? HoldRange(pose, targetPos, MovementRange(false, now), pursue) : Vector2.zero;
             }
             else
             {
@@ -252,13 +293,16 @@ namespace MDS.Systems
                     droppedBlock = true;
                 }
                 // Free: 'press' closes to the OFFENSIVE range; otherwise hold the reading distance.
-                intent.MoveAxis = _move ? HoldRange(pose, targetPos, MovementRange(_press, now)) : Vector2.zero;
+                intent.MoveAxis = _move ? HoldRange(pose, targetPos, MovementRange(press, now), pursue) : Vector2.zero;
 
                 // Attack when the enemy isn't threatening. With 'priority' this is the post-block riposte and
                 // fires immediately (ignoring cooldown/press); otherwise it's throwing FIRST, gated by 'press'.
                 // Skip the tick we drop the block (StopMeleeBlock took the action channel; strike resumes next).
-                if ((_press || _riposte) && !droppedBlock)
-                    StepAttack(ref intent, pose, targetPos, priority);
+                // Also call while a chamber is in progress even if press/riposte just went off (e.g. a Guardian
+                // whose target died mid-swing drops to passive) so the held MeleeStrike is RELEASED cleanly
+                // instead of being left to auto-cycle.
+                if ((press || riposte || _attackPhase == AttackPhase.Chamber) && !droppedBlock)
+                    StepAttack(ref intent, pose, targetPos, priority, press);
             }
 
             // Establish run once, on the first tick we actually engage a target (sticky engine toggle).
@@ -296,8 +340,8 @@ namespace MDS.Systems
         // Attack sequencer. A strike is ONE MeleeStrike{dir} (starts + holds the windup), silence while it holds,
         // then ONE ExecuteMeleeWeaponStrike to release it, then a cooldown. Blocking pre-empts this (in Decide).
         // 'priority' (a post-block riposte) bypasses both 'press' and the cooldown; a non-priority strike is the
-        // bot THROWING FIRST and only fires when 'press' is enabled.
-        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, bool priority)
+        // bot THROWING FIRST and only fires when 'press' is enabled (effective press, gated by passive state).
+        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, bool priority, bool press)
         {
             float now = Time.realtimeSinceStartup;
 
@@ -323,7 +367,7 @@ namespace MDS.Systems
             // non-priority strike (throwing first) needs 'press' and respects the cooldown.
             if (!priority)
             {
-                if (!_press) return;
+                if (!press) return;
                 if (now < _attackCooldownUntil) return;
             }
             if ((targetPos - pose.Position).sqrMagnitude > _attackRange * _attackRange) return;
@@ -365,15 +409,17 @@ namespace MDS.Systems
         }
 
         // Local input axis to sit at the given hold range: close in if too far, ease back if too close, stand inside
-        // the tolerance band. Re-solved each tick against the live pose since the target moves.
-        private static Vector2 HoldRange(BotPose pose, Vector2 targetPos, float range)
+        // the tolerance band. Re-solved each tick against the live pose since the target moves. When 'pursue' is
+        // off we DON'T close a gap that's too big (we only ever hold or back off), so a retreating player can walk
+        // away and disengage instead of being followed forever.
+        private static Vector2 HoldRange(BotPose pose, Vector2 targetPos, float range, bool pursue)
         {
             Vector2 toTarget = targetPos - pose.Position;
             float dist = toTarget.magnitude;
             if (dist < 1e-4f) return Vector2.zero;
 
             Vector2 dir = toTarget / dist;
-            if (dist > range + RangeTolerance) return MovementSolver.ToLocalAxis(pose, dir, 1f);
+            if (dist > range + RangeTolerance) return pursue ? MovementSolver.ToLocalAxis(pose, dir, 1f) : Vector2.zero;
             if (dist < range - RangeTolerance) return MovementSolver.ToLocalAxis(pose, -dir, BackoffThrottle);
             return Vector2.zero;
         }
@@ -384,29 +430,135 @@ namespace MDS.Systems
         // clear the pin and fall back to auto-acquiring the nearest enemy.
         public void SetTarget(int? playerId) => _assignedTargetId = playerId;
 
-        // Target resolution: a higher-layer pin wins while it's a live enemy; otherwise keep the current sticky
-        // target while valid, else acquire the nearest. (Strict "stand down when the pin dies" is a supervisor
-        // policy for a later step; for now a dead pin simply falls through to nearest.)
-        private IPlayer ResolveTarget(BotController self)
+        // Target resolution, in priority order:
+        //  1. External pin (ITargetableAi) - a supervisor's explicit choice; wins while it's a live candidate.
+        //  2. Attacker-lock - once a candidate begins a strike we lock onto it through the exchange (plus a tail
+        //     that covers our riposte), regardless of who's now closer, so we don't get pulled off an attacker.
+        //  3. Sticky - keep the current target while it's still a valid candidate (Fight/Defend duel one foe).
+        //  4. Otherwise the nearest candidate (Sparring, stickyTarget off, re-picks the closest in range).
+        // A "candidate" is a spawned OTHER player, filtered by team (unless ignoreTeam) and by targetRange.
+        private IPlayer ResolveTarget(BotController self, float now)
         {
+            // 1. External pin.
             if (_assignedTargetId is int pinned)
             {
                 IPlayer p = StateTracker.GetPlayerById(pinned);
-                if (IsEnemy(self, p)) return p;
+                if (IsCandidate(self, p, ignoreRange: true)) return p;
             }
 
-            if (_targetId.HasValue)
+            // 1b. engageOnAttack (Guardian): a passive/engaged state machine that fully owns targeting.
+            if (_engageOnAttack)
+                return ResolveEngageOnAttack(self, now);
+
+            // 2. Attacker-lock. Hold it (ignoring range/closest) while live and unexpired, refreshing while that
+            //    player is still striking. Don't (re)acquire a lock mid-OWN-swing, so we finish our stab on the
+            //    current target rather than hopping aim to a new attacker.
+            if (_lockTargetId is int locked)
             {
-                IPlayer current = StateTracker.GetPlayerById(_targetId.Value);
-                if (IsEnemy(self, current)) return current;
+                IPlayer lp = StateTracker.GetPlayerById(locked);
+                if (now < _lockUntil && IsCandidate(self, lp, ignoreRange: true))
+                {
+                    if (CombatTracker.TryGet(locked, out CombatTracker.MeleeState ls) && ls.IsThreat(now))
+                        _lockUntil = now + LockTail;
+                    _targetId = locked;
+                    return lp;
+                }
+                _lockTargetId = null;
             }
 
-            IPlayer nearest = FindNearestEnemy(self);
+            bool ownSwing = _attackPhase == AttackPhase.Chamber || now < _strikeCommittedUntil;
+            if (!ownSwing)
+            {
+                IPlayer striker = FindNearestStriker(self, now);
+                if (striker != null)
+                {
+                    _lockTargetId = striker.PlayerId;
+                    _lockUntil = now + LockTail;
+                    _targetId = striker.PlayerId;
+                    return striker;
+                }
+            }
+
+            // 3. Sticky.
+            if (_stickyTarget && _targetId is int cur)
+            {
+                IPlayer c = StateTracker.GetPlayerById(cur);
+                if (IsCandidate(self, c, ignoreRange: false)) return c;
+            }
+
+            // 4. Nearest candidate in range.
+            IPlayer nearest = FindNearestCandidate(self);
             _targetId = nearest?.PlayerId;
             return nearest;
         }
 
-        private static IPlayer FindNearestEnemy(BotController self)
+        // engageOnAttack targeting (Guardian). PASSIVE: face/block the nearest candidate within targetRange but
+        // don't fight (Decide gates press/riposte/pursue off while passive). The moment a candidate in that range
+        // strikes, ENGAGE it - lock it as the target and fight (Decide re-enables the fight levers) until it dies,
+        // tracked regardless of range. When the engaged target dies/leaves we drop back to passive. _engaged is
+        // runtime only (not inherited), so a Replace replacement starts passive again.
+        private IPlayer ResolveEngageOnAttack(BotController self, float now)
+        {
+            if (_engaged && _engagedTargetId is int et)
+            {
+                IPlayer t = StateTracker.GetPlayerById(et);
+                if (IsCandidate(self, t, ignoreRange: true)) // still alive/valid: stay engaged, locked past range
+                {
+                    _targetId = et;
+                    return t;
+                }
+                _engaged = false;          // target died or left the game - back to passive
+                _engagedTargetId = null;
+            }
+
+            // Passive: a striker within our (small) targetRange provokes us into engaging that attacker.
+            IPlayer striker = FindNearestStriker(self, now);
+            if (striker != null)
+            {
+                _engaged = true;
+                _engagedTargetId = striker.PlayerId;
+                _targetId = striker.PlayerId;
+                return striker;
+            }
+
+            // Nobody attacking: just face/block the nearest player in range.
+            IPlayer near = FindNearestCandidate(self);
+            _targetId = near?.PlayerId;
+            return near;
+        }
+
+        // How long an attacker-lock outlives the strike: long enough to land our riposte (reaction + window + a beat).
+        private float LockTail => _riposteReactionMax + _riposteWindow + 0.3f;
+
+        // Closest candidate currently mid-strike (winding up or in a committed lethal window) within lock range,
+        // or null. Lock range = targetRange, or StrikerLockRange when targeting is unlimited so a distant swing
+        // at someone else can't grab us. Once locked, the lock holds on regardless of range (see ResolveTarget).
+        private IPlayer FindNearestStriker(BotController self, float now)
+        {
+            if (!(self.Position is Vector3 selfPos)) return null;
+
+            float range = _targetRange > 0f ? _targetRange : StrikerLockRange;
+            float rangeSqr = range * range;
+
+            IPlayer nearest = null;
+            float bestSqr = float.MaxValue;
+
+            var players = StateTracker.AllPlayers;
+            for (int i = 0; i < players.Count; i++)
+            {
+                IPlayer p = players[i];
+                if (!IsCandidate(self, p, ignoreRange: true)) continue; // team/spawned; range applied here
+                if (!CombatTracker.TryGet(p.PlayerId, out CombatTracker.MeleeState st) || !st.IsThreat(now)) continue;
+
+                float sqr = (p.PlayerObject.transform.position - selfPos).sqrMagnitude;
+                if (sqr > rangeSqr) continue;
+                if (sqr < bestSqr) { bestSqr = sqr; nearest = p; }
+            }
+
+            return nearest;
+        }
+
+        private IPlayer FindNearestCandidate(BotController self)
         {
             if (!(self.Position is Vector3 selfPos)) return null;
 
@@ -417,7 +569,7 @@ namespace MDS.Systems
             for (int i = 0; i < players.Count; i++)
             {
                 IPlayer p = players[i];
-                if (!IsEnemy(self, p)) continue;
+                if (!IsCandidate(self, p, ignoreRange: false)) continue;
 
                 float sqr = (p.PlayerObject.transform.position - selfPos).sqrMagnitude;
                 if (sqr < bestSqr) { bestSqr = sqr; nearest = p; }
@@ -426,15 +578,26 @@ namespace MDS.Systems
             return nearest;
         }
 
-        // An enemy is a spawned player on a different, valid faction (not us, not a teammate, not a spectator).
-        private static bool IsEnemy(BotController self, IPlayer p)
+        // A targetable player: spawned and ALIVE (a corpse is skipped), not us, on a hostile faction (unless
+        // ignoreTeam targets anyone) and - unless ignoreRange - within targetRange (targetRange <= 0 = unlimited).
+        private bool IsCandidate(BotController self, IPlayer p, bool ignoreRange)
         {
-            return p != null
-                && p.PlayerId != self.PlayerId
-                && p.PlayerObject != null
-                && p.Faction.HasValue
-                && self.Bot.Faction.HasValue
-                && p.Faction.Value != self.Bot.Faction.Value;
+            if (p == null || p.PlayerObject == null || !p.IsAlive || p.PlayerId == self.PlayerId) return false;
+
+            if (!_ignoreTeam)
+            {
+                if (!p.Faction.HasValue || !self.Bot.Faction.HasValue || p.Faction.Value == self.Bot.Faction.Value)
+                    return false;
+            }
+
+            if (!ignoreRange && _targetRange > 0f)
+            {
+                if (!(self.Position is Vector3 selfPos)) return false;
+                if ((p.PlayerObject.transform.position - selfPos).sqrMagnitude > _targetRange * _targetRange)
+                    return false;
+            }
+
+            return true;
         }
 
         private BotIntent DropBlock(BotIntent intent)
@@ -453,7 +616,8 @@ namespace MDS.Systems
         {
             "offensiveRange", "offensiveRangeVariance", "defensiveRange", "defensiveRangeVariance",
             "attackRange", "attackReadBeat", "riposteReactionMin", "riposteReactionMax", "riposteWindow",
-            "blockReactionMin", "blockReactionMax", "aimOffset", "press", "riposte", "move"
+            "blockReactionMin", "blockReactionMax", "press", "riposte", "move", "pursue",
+            "targetRange", "ignoreTeam", "stickyTarget", "engageOnAttack"
         };
 
         public bool TrySet(string name, string value, out string error)
@@ -472,10 +636,14 @@ namespace MDS.Systems
                 case "ripostewindow":          return SetFloat(value, 0f, v => _riposteWindow = v, "riposteWindow", ref error);
                 case "blockreactionmin":       return SetFloat(value, 0f, v => _blockReactionMin = v, "blockReactionMin", ref error);
                 case "blockreactionmax":       return SetFloat(value, 0f, v => _blockReactionMax = v, "blockReactionMax", ref error);
-                case "aimoffset":              return SetFloat(value, float.MinValue, v => _aimOffset = v, "aimOffset", ref error); // may be negative (flips the side)
                 case "press":   return SetBool(value, v => _press = v, "press", ref error);
                 case "riposte": return SetBool(value, v => _riposte = v, "riposte", ref error);
                 case "move":    return SetBool(value, v => _move = v, "move", ref error);
+                case "pursue":  return SetBool(value, v => _pursue = v, "pursue", ref error);
+                case "targetrange":  return SetFloat(value, 0f, v => _targetRange = v, "targetRange", ref error); // 0 = unlimited
+                case "ignoreteam":   return SetBool(value, v => _ignoreTeam = v, "ignoreTeam", ref error);
+                case "stickytarget": return SetBool(value, v => _stickyTarget = v, "stickyTarget", ref error);
+                case "engageonattack": return SetBool(value, v => _engageOnAttack = v, "engageOnAttack", ref error);
                 default:
                     error = $"Unknown lever '{name}'. MeleeAi levers: {string.Join(", ", LeverNames)}.";
                     return false;
@@ -495,10 +663,14 @@ namespace MDS.Systems
             yield return ("riposteWindow", _riposteWindow.ToString("0.##"));
             yield return ("blockReactionMin", _blockReactionMin.ToString("0.##"));
             yield return ("blockReactionMax", _blockReactionMax.ToString("0.##"));
-            yield return ("aimOffset", _aimOffset.ToString("0.##"));
             yield return ("press", _press ? "on" : "off");
             yield return ("riposte", _riposte ? "on" : "off");
             yield return ("move", _move ? "on" : "off");
+            yield return ("pursue", _pursue ? "on" : "off");
+            yield return ("targetRange", _targetRange.ToString("0.##"));
+            yield return ("ignoreTeam", _ignoreTeam ? "on" : "off");
+            yield return ("stickyTarget", _stickyTarget ? "on" : "off");
+            yield return ("engageOnAttack", _engageOnAttack ? "on" : "off");
         }
 
         private static bool SetFloat(string value, float min, System.Action<float> set, string name, ref string error)
@@ -534,8 +706,9 @@ namespace MDS.Systems
             _riposteReactionMin = p._riposteReactionMin; _riposteReactionMax = p._riposteReactionMax;
             _riposteWindow = p._riposteWindow;
             _blockReactionMin = p._blockReactionMin; _blockReactionMax = p._blockReactionMax;
-            _aimOffset = p._aimOffset;
-            _press = p._press; _riposte = p._riposte; _move = p._move;
+            _press = p._press; _riposte = p._riposte; _move = p._move; _pursue = p._pursue;
+            _targetRange = p._targetRange; _ignoreTeam = p._ignoreTeam; _stickyTarget = p._stickyTarget;
+            _engageOnAttack = p._engageOnAttack; // carry the lever; _engaged/_engagedTargetId are NOT carried, so a replacement starts passive
             _assignedTargetId = p._assignedTargetId;
             RollHoldRange();
         }
