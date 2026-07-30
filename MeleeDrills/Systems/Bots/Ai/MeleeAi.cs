@@ -71,6 +71,7 @@ namespace MDS.Systems
         // Targeting levers (see ResolveTarget).
         private float _targetRange;   // only acquire candidates within this range (<= 0 = unlimited)
         private bool _ignoreTeam;     // target any player regardless of faction (else enemies only)
+        private bool _ignoreBots;     // target only human players (skip bots)
         private bool _stickyTarget;   // keep the current target while valid (else re-pick the closest each tick)
         private float _passiveRange;  // engageOnAttack: hold distance while WAITING/passive (engaged uses defensiveRange)
 
@@ -122,32 +123,54 @@ namespace MDS.Systems
 
         public BotAiEnum AiType => _aiType;
 
-        // Built-in lever defaults per preset. Shared tuned values, then the capability toggles that make the
-        // preset. GlobalAiConfigurable seeds the global defaults from this, so 'rc get globalAI' reports them.
+        // Built-in lever defaults per preset. Shared tuned values (ranges/spacing), then the capability toggles,
+        // targeting, and DIFFICULTY (reaction beats) that make each preset. GlobalAiConfigurable seeds the global
+        // defaults from this, so 'rc get globalAI' reports them.
         public static (string name, string value)[] DefaultLeversFor(BotAiEnum aiType)
         {
             var levers = new List<(string, string)>
             {
                 ("offensiveRange", "0.7"), ("offensiveRangeVariance", "0.1"),
                 ("defensiveRange", "2.0"), ("defensiveRangeVariance", "0.4"),
-                ("attackRange", "2.0"), ("attackReadBeat", "0.6"),
-                ("riposteReactionMin", "0"), ("riposteReactionMax", "0.5"), ("riposteWindow", "0.6"),
-                ("blockReactionMin", "0.1"), ("blockReactionMax", "0.2"), // a human-like beat before the guard goes up
+                ("attackRange", "2.0"), ("riposteWindow", "0.6"),
                 ("ignoreTeam", "true"),                                  // target anyone by default (drill utility - no need to be on the opposing faction)
                 ("passiveRange", "0.6"),                                // engageOnAttack waiting-mode hold distance (Dueling)
             };
             switch (aiType)
             {
+                // Dueling family: passive (block only) until a player in range strikes it and it blocks the hit;
+                // then it locks that attacker and fights (these fight levers) to the death, then back to passive.
+                // targetRange is the passive read/provoke range. The three tiers share everything but the reaction
+                // beats (the difficulty knobs). They only respond to human players (ignoreBots).
+                case BotAiEnum.DuelingEasy:
+                case BotAiEnum.DuelingNormal:
                 case BotAiEnum.Dueling:
-                    // Passive (block only) until a player in range strikes it; then it locks onto that attacker and
-                    // fights (these fight levers) until the attacker dies, then returns to passive. targetRange is
-                    // the passive read/provoke range; while engaged the target is tracked regardless of range.
                     levers.Add(("press", "true"));  levers.Add(("riposte", "true"));  levers.Add(("move", "true")); levers.Add(("pursue", "true"));
-                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "true")); break;
-                default: // RiposteDummy
-                    // Only engages players who come close, faces the closest, and gives up when they leave.
+                    levers.Add(("targetRange", "3")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "true"));
+                    levers.Add(("ignoreBots", "true"));
+                    switch (aiType)
+                    {
+                        case BotAiEnum.DuelingEasy:   // sluggish, beatable
+                            levers.Add(("blockReactionMin", "0.3")); levers.Add(("blockReactionMax", "0.5"));
+                            levers.Add(("riposteReactionMin", "0.2")); levers.Add(("riposteReactionMax", "0.8"));
+                            levers.Add(("attackReadBeat", "0.9")); break;
+                        case BotAiEnum.DuelingNormal: // human reactions (the tuned baseline)
+                            levers.Add(("blockReactionMin", "0.1")); levers.Add(("blockReactionMax", "0.2"));
+                            levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0.5"));
+                            levers.Add(("attackReadBeat", "0.6")); break;
+                        default:                      // Dueling: best/superhuman reactions + fastest pacing
+                            levers.Add(("blockReactionMin", "0")); levers.Add(("blockReactionMax", "0"));
+                            levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0"));
+                            levers.Add(("attackReadBeat", "0.3")); break;
+                    }
+                    break;
+                default: // RiposteDummy - stands its ground, blocks, counters only; engages the closest in range.
                     levers.Add(("press", "false")); levers.Add(("riposte", "true"));  levers.Add(("move", "false")); levers.Add(("pursue", "false"));
-                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "false")); break;
+                    levers.Add(("targetRange", "4")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "false"));
+                    levers.Add(("ignoreBots", "false"));
+                    levers.Add(("blockReactionMin", "0.1")); levers.Add(("blockReactionMax", "0.2"));
+                    levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0.5"));
+                    levers.Add(("attackReadBeat", "0.6")); break;
             }
             return levers.ToArray();
         }
@@ -581,11 +604,14 @@ namespace MDS.Systems
             return nearest;
         }
 
-        // A targetable player: spawned and ALIVE (a corpse is skipped), not us, on a hostile faction (unless
-        // ignoreTeam targets anyone) and - unless ignoreRange - within targetRange (targetRange <= 0 = unlimited).
+        // A targetable player: spawned and ALIVE (a corpse is skipped), not us, a human (unless we target bots
+        // too), on a hostile faction (unless ignoreTeam targets anyone) and - unless ignoreRange - within
+        // targetRange (targetRange <= 0 = unlimited).
         private bool IsCandidate(BotController self, IPlayer p, bool ignoreRange)
         {
             if (p == null || p.PlayerObject == null || !p.IsAlive || p.PlayerId == self.PlayerId) return false;
+
+            if (_ignoreBots && p.IsBot) return false;
 
             if (!_ignoreTeam)
             {
@@ -620,7 +646,7 @@ namespace MDS.Systems
             "offensiveRange", "offensiveRangeVariance", "defensiveRange", "defensiveRangeVariance",
             "attackRange", "attackReadBeat", "riposteReactionMin", "riposteReactionMax", "riposteWindow",
             "blockReactionMin", "blockReactionMax", "press", "riposte", "move", "pursue",
-            "targetRange", "ignoreTeam", "stickyTarget", "engageOnAttack", "passiveRange"
+            "targetRange", "ignoreTeam", "ignoreBots", "stickyTarget", "engageOnAttack", "passiveRange"
         };
 
         public bool TrySet(string name, string value, out string error)
@@ -645,6 +671,7 @@ namespace MDS.Systems
                 case "pursue":  return SetBool(value, v => _pursue = v, "pursue", ref error);
                 case "targetrange":  return SetFloat(value, 0f, v => _targetRange = v, "targetRange", ref error); // 0 = unlimited
                 case "ignoreteam":   return SetBool(value, v => _ignoreTeam = v, "ignoreTeam", ref error);
+                case "ignorebots":   return SetBool(value, v => _ignoreBots = v, "ignoreBots", ref error);
                 case "stickytarget": return SetBool(value, v => _stickyTarget = v, "stickyTarget", ref error);
                 case "engageonattack": return SetBool(value, v => _engageOnAttack = v, "engageOnAttack", ref error);
                 case "passiverange": return SetFloat(value, 0f, v => _passiveRange = v, "passiveRange", ref error);
@@ -673,6 +700,7 @@ namespace MDS.Systems
             yield return ("pursue", _pursue ? "true" : "false");
             yield return ("targetRange", _targetRange.ToString("0.##"));
             yield return ("ignoreTeam", _ignoreTeam ? "true" : "false");
+            yield return ("ignoreBots", _ignoreBots ? "true" : "false");
             yield return ("stickyTarget", _stickyTarget ? "true" : "false");
             yield return ("engageOnAttack", _engageOnAttack ? "true" : "false");
             yield return ("passiveRange", _passiveRange.ToString("0.##"));
@@ -712,7 +740,7 @@ namespace MDS.Systems
             _riposteWindow = p._riposteWindow;
             _blockReactionMin = p._blockReactionMin; _blockReactionMax = p._blockReactionMax;
             _press = p._press; _riposte = p._riposte; _move = p._move; _pursue = p._pursue;
-            _targetRange = p._targetRange; _ignoreTeam = p._ignoreTeam; _stickyTarget = p._stickyTarget;
+            _targetRange = p._targetRange; _ignoreTeam = p._ignoreTeam; _ignoreBots = p._ignoreBots; _stickyTarget = p._stickyTarget;
             _passiveRange = p._passiveRange;
             _engageOnAttack = p._engageOnAttack; // carry the lever; _engaged/_engagedTargetId are NOT carried, so a replacement starts passive
             _assignedTargetId = p._assignedTargetId;
