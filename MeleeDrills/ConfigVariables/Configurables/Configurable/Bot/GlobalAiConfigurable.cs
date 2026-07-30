@@ -27,6 +27,8 @@ namespace MDS.ConfigVariables
             // Seed the built-in defaults for every configurable AI. Add a Seed line when a new AI gets levers.
             Seed(BotAiEnum.StabbingDummy, MeleeDummy.DefaultLevers);
             Seed(BotAiEnum.RiposteDummy, MeleeAi.DefaultLeversFor(BotAiEnum.RiposteDummy));
+            Seed(BotAiEnum.DuelingEasy, MeleeAi.DefaultLeversFor(BotAiEnum.DuelingEasy));
+            Seed(BotAiEnum.DuelingNormal, MeleeAi.DefaultLeversFor(BotAiEnum.DuelingNormal));
             Seed(BotAiEnum.Dueling, MeleeAi.DefaultLeversFor(BotAiEnum.Dueling));
         }
 

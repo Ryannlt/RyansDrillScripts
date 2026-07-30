@@ -396,9 +396,9 @@ Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot 
 | `Manual` | Manually driven with `rc bot move` (a movement test harness: seek, arrive, flee, pursue, evade, wander, face…). Issues no orders on its own. |
 | `StabbingDummy` | Static training dummy — stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking/attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
 | `RiposteDummy` | Reactive melee — stands its ground, blocks, and only **counters once provoked** (never throws first). A patient sparring partner: walk up and attack it, it blocks and ripostes. |
-| `Dueling` | Sentry melee — **passive** (reads and blocks the closest player in range) until a player attacks it and it **blocks the hit**; then it locks onto that attacker and fights to the death. When its target dies it returns to passive; if it dies and is replaced, the replacement starts passive again. |
+| `DuelingEasy` / `DuelingNormal` / `Dueling` | Sentry melee at three **difficulty tiers** — **passive** (reads and blocks the closest player in range) until a player attacks it and it **blocks the hit**; then it locks onto that attacker and fights to the death, returning to passive when the target dies (a replacement starts passive again). They only respond to **human players** (`ignoreBots`). The tiers differ only in reaction speed: `DuelingEasy` is sluggish/beatable, `DuelingNormal` is human, and plain `Dueling` is the hardest — instant (superhuman) blocks and ripostes. |
 
-`RiposteDummy` and `Dueling` are **presets of one configurable melee AI** — the same behaviour with different capability toggles (`press` / `riposte` / `move` / `pursue` / `engageOnAttack`) and tuning; the former `MeleeFight`/`MeleeDefend` behaviours are reachable by tuning those levers. `StabbingDummy` is a separate static-stabber AI. Tweak any per bot with `rc bot cfg` (see below).
+`RiposteDummy` and the `Dueling*` tiers are **presets of one configurable melee AI** — the same behaviour with different capability toggles (`press` / `riposte` / `move` / `pursue` / `engageOnAttack`) and tuning; the former `MeleeFight`/`MeleeDefend` behaviours are reachable by tuning those levers. `StabbingDummy` is a separate static-stabber AI. Tweak any per bot with `rc bot cfg` (see below).
 
 ### Configurable AI levers
 
@@ -427,48 +427,53 @@ rc bot cfg <id> stabInterval 3
 rc bot cfg <id> stabDirection High
 ```
 
-**`RiposteDummy` / `Dueling` levers**
+**`RiposteDummy` / `Dueling*` levers**
 
-Both are presets of one melee AI and share the same levers. They differ only in the defaults of the **toggles and targeting** (booleans are `true`/`false`; `on`/`off` is still accepted as input):
+`RiposteDummy` and the three `Dueling` difficulty tiers are presets of one melee AI and share the same levers. The `Dueling` tiers are identical except for their reaction speeds. Booleans are `true`/`false` (`on`/`off` still accepted as input).
 
-| Setting | `RiposteDummy` | `Dueling` | Meaning |
+**Toggles & targeting** (the `Dueling` tiers share one column):
+
+| Setting | `RiposteDummy` | `Dueling*` | Meaning |
 | --- | --- | --- | --- |
 | `press` | `false` | `true` | Throw the first blow when the enemy isn't threatening. |
 | `riposte` | `true` | `true` | Counter after the guard absorbs a hit. |
 | `move` | `false` | `true` | Hold/adjust melee spacing vs. stand its ground. |
 | `pursue` | `false` | `true` | Advance toward a target that's too far vs. only hold/back off. `false` lets a player back away and **disengage** instead of being followed. |
 | `stickyTarget` | `false` | `false` | Keep one target while valid vs. re-pick the **closest** each tick. |
-| `targetRange` | `4` | `4` | Only engage players within this many metres (`0` = unlimited); drops the target past it. For `Dueling` this is its passive read/provoke range. |
+| `targetRange` | `4` | `3` | Only engage players within this many metres (`0` = unlimited); drops the target past it. For `Dueling*` this is the passive read/provoke range. |
 | `engageOnAttack` | `false` | `true` | Start **passive** (block only, `press`/`riposte`/`pursue` suppressed) and engage only a player whose attack it **blocks** (a hit aimed at it, not just anyone swinging nearby), fighting that target until it dies — then back to passive. |
+| `ignoreBots` | `false` | `true` | Only target human players (skip bots). The `Dueling` tiers ignore bots so they focus the player and aren't provoked by other bots. |
 
-The **tuning levers** below share the same defaults across both presets (`seconds ≥ 0` or `metres`, floats):
+**Difficulty** — the reaction levers that separate the three `Dueling` tiers (`seconds ≥ 0`):
+
+| Lever | `RiposteDummy` | `DuelingEasy` | `DuelingNormal` | `Dueling` | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `blockReactionMin` | `0.1` | `0.3` | `0.1` | `0` | Min delay between reading an attack and raising the guard. `0` = instant/superhuman. **Main difficulty knob.** |
+| `blockReactionMax` | `0.2` | `0.5` | `0.2` | `0` | Max of that delay (each block picks a random value in the min–max range). |
+| `riposteReactionMin` | `0` | `0.2` | `0` | `0` | Min delay between a block landing and the counter. |
+| `riposteReactionMax` | `0.5` | `0.8` | `0.5` | `0` | Max of that delay. |
+| `attackReadBeat` | `0.6` | `0.9` | `0.6` | `0.3` | Extra randomised beat added to the attack cooldown (pacing; lower = presses faster). |
+
+**Shared tuning** — same defaults across all these presets (`seconds ≥ 0` or `metres`, floats):
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `blockReactionMin` | `0.1` | Min delay between reading an attack and raising the guard. `0` = instant/superhuman. **Main difficulty knob.** |
-| `blockReactionMax` | `0.2` | Max of that delay (each block picks a random value in the min–max range). |
-| `riposteReactionMin` | `0` | Min delay between a block landing and the counter. |
-| `riposteReactionMax` | `0.5` | Max of that delay. |
 | `riposteWindow` | `0.6` | How long the post-block counter stays available (seconds). |
 | `offensiveRange` | `0.7` | Close spacing it presses to (metres). |
 | `offensiveRangeVariance` | `0.1` | Random jitter added on top of `offensiveRange`. |
 | `defensiveRange` | `2.0` | Reading spacing it guards from (metres). |
 | `defensiveRangeVariance` | `0.4` | Random jitter added on top of `defensiveRange`. |
 | `attackRange` | `2.0` | How close before it commits a stab (metres). |
-| `attackReadBeat` | `0.6` | Extra randomised beat added to the attack cooldown (seconds; pacing). |
 | `ignoreTeam` | `true` | Target **any** player regardless of faction (`false` = enemies only). Defaults `true` so you don't have to be on the opposing team to use a bot. |
-| `passiveRange` | `0.6` | `Dueling` only: the hold distance while **waiting** (passive). Small so it stands its ground instead of backing off ~`defensiveRange` from an approaching player; it uses `defensiveRange` once engaged. |
-
-`blockReaction` defaults to a ~0.1–0.2s human beat before the guard goes up — raise it for an easier bot, or set both to `0` for an instant/superhuman block. With `pursue false` (the `RiposteDummy` default, and while a `Dueling` bot is passive) the bot holds its ground and won't chase, so a player can **walk away to disengage**.
+| `passiveRange` | `0.6` | `Dueling*` only: the hold distance while **waiting** (passive). Small so it stands its ground instead of backing off ~`defensiveRange` from an approaching player; it uses `defensiveRange` once engaged. |
 
 **Attacker-lock** (automatic, no lever): once a player within melee range begins a strike, the bot locks onto them through the exchange — including its riposte — regardless of who else is closer, so it can't be pulled off an attacker mid-fight.
 
-*Example — an easier `Dueling` bot that takes ~0.25–0.4s to block:*
+*Example — pick a difficulty out of the box, or fine-tune one lever:*
 
 ```
-rc bot summon Defending ArmyLineInfantry Dueling
-rc bot cfg <id> blockReactionMin 0.25
-rc bot cfg <id> blockReactionMax 0.4
+rc bot summon Defending ArmyLineInfantry DuelingEasy
+rc bot cfg <id> blockReactionMax 0.6   # make this one even slower
 ```
 
 ---
@@ -523,7 +528,7 @@ rc bot cfg <id> blockReactionMax 0.4
   * **default:** `90` (NorthSouth)
 * **botDefaultAi** — Default AI behaviour assigned to bots that do not specify one inline.
 
-  * **args:** `None | Manual | StabbingDummy | RiposteDummy | Dueling` (see [Bot AI Types](#bot-ai-types))
+  * **args:** `None | Manual | StabbingDummy | RiposteDummy | DuelingEasy | DuelingNormal | Dueling` (see [Bot AI Types](#bot-ai-types))
   * **default:** `None`
 * **botDefaultDeathPolicy** — Default death policy assigned to bots that do not specify one inline.
 
@@ -585,7 +590,7 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 ### Bot
 
-* **SetBotDefaultAi** — `None | Manual | StabbingDummy | RiposteDummy | Dueling`
+* **SetBotDefaultAi** — `None | Manual | StabbingDummy | RiposteDummy | DuelingEasy | DuelingNormal | Dueling`
 * **SetBotDefaultDeathPolicy** — `None | Kick | Replace`
 * **SetBotKickDelay** — `seconds(float)`
 * **SetBotReplaceDelay** — `seconds(float)`
