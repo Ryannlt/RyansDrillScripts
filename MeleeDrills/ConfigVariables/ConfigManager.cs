@@ -37,6 +37,7 @@ namespace MDS.ConfigVariables
             RegisterConfigVariable(ConfigCommandEnum.SetBotKickDelay, new SetBotKickDelay());
             RegisterConfigVariable(ConfigCommandEnum.SetBotReplaceDelay, new SetBotReplaceDelay());
             RegisterConfigVariable(ConfigCommandEnum.SetGlobalAi, new SetGlobalAi());
+            RegisterConfigVariable(ConfigCommandEnum.SpawnBot, new SpawnBot());
             RegisterConfigVariable(ConfigCommandEnum.SetLineBotCount, new SetLineBotCount());
             RegisterConfigVariable(ConfigCommandEnum.SetLineSpacing, new SetLineSpacing());
             RegisterConfigVariable(ConfigCommandEnum.SpawnLine, new SpawnLine());

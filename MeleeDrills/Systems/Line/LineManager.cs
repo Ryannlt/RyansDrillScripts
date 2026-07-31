@@ -88,7 +88,12 @@ namespace MDS.Systems
 
         private static IEnumerator SpawnStagedAfterDelay()
         {
+            // The coroutine runner survives a map change, so a rotation during this delay would spawn this
+            // round's lines into the next one. Drop the work if tracking was torn down while we waited.
+            int generation = BotManager.Generation;
             yield return new WaitForSeconds(SpawnDelaySeconds);
+            if (generation != BotManager.Generation) yield break;
+
             SpawnAllStaged();
         }
 

@@ -602,6 +602,21 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
   mod_variable_local MDS:SetGlobalAi:StabbingDummy,stabInterval,2.5
   mod_variable_local MDS:SetGlobalAi:StabbingDummy,stabDirection,High
   ```
+* **SpawnBot**: `x,z,rotation[,faction][,class][,ai][,death][,name[,regtag[,uniformId]]]`
+
+  Schedules a single bot to spawn at a world position when the round begins. Specify it multiple times for multiple bots. Same fields as `SpawnLine` but with no `count`; use `SpawnLine` when you want more than one bot.
+  * `x,z,rotation`: required. World position and facing (degrees from North).
+  * `faction`: optional. `attacking` (default), `defending`, or a faction name (e.g. `French`). `attacking`/`defending` resolve against the live round at spawn time, so the same config works across maps.
+  * `class`: optional. Defaults to `ArmyLineInfantry`.
+  * `ai,death`: optional. Default to `botDefaultAi` / `botDefaultDeathPolicy`.
+  * `name,regtag,uniformId`: optional identity extras.
+
+  *Examples:*
+
+  ```
+  mod_variable_local MDS:SpawnBot:-20,30,90
+  mod_variable_local MDS:SpawnBot:12,-4,180,defending,ArmyLineInfantry,Dueling,Replace
+  ```
 
 ### Line
 
@@ -652,6 +667,7 @@ mod_variable_local MDS:SetBotDefaultDeathPolicy:Replace
 mod_variable_local MDS:SetBotKickDelay:2
 mod_variable_local MDS:SetBotReplaceDelay:0.5
 mod_variable_local MDS:SetGlobalAi:StabbingDummy,stabInterval,2.5
+mod_variable_local MDS:SpawnBot:0,0,90,defending,ArmyLineInfantry,Dueling,Replace
 mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
 mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
 ```

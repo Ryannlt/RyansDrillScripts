@@ -31,7 +31,17 @@ namespace MDS.Systems
         private static readonly Queue<PendingBotSpawn> _pending = new();
         private static Coroutine _tickRoutine;
 
+        // Bumped whenever tracking is torn down (new round, remove all). Delayed work runs on the
+        // DontDestroyOnLoad coroutine runner, so it outlives a map change; anything scheduled in an earlier
+        // generation must not spawn into the current one. A stale replacement would enqueue a pending entry
+        // holding the previous round's AI and placement, and since joining bots are paired with pending entries
+        // in arrival order, that one stale entry shifts every assignment after it.
+        private static int _generation;
+
         public static IReadOnlyList<BotController> Bots => _bots;
+
+        // Read by other systems that schedule delayed spawns (see LineManager) so they can drop stale work.
+        public static int Generation => _generation;
 
         // Command surface.
 
@@ -106,6 +116,7 @@ namespace MDS.Systems
             foreach (var bot in _bots.ToList())
                 CarbonPlayerCommands.Despawn(bot.PlayerId);
 
+            _generation++; // drop any scheduled replacement, so a removed bot can't come back
             _bots.Clear();
             _pending.Clear();
             StopTicking();
@@ -116,6 +127,12 @@ namespace MDS.Systems
         public static void OnBotJoined(IPlayer bot)
         {
             if (_bots.Any(b => b.PlayerId == bot.PlayerId)) return;
+
+            // Joining bots are paired with spawn requests in arrival order, since the join callback carries no
+            // link back to the request. A bot with no pending request is therefore unexpected (something spawned
+            // it outside the mod, or the queue desynced) and it falls back to the configured defaults.
+            if (_pending.Count == 0)
+                Logger.Log($"Bot {bot.PlayerId} joined with no pending spawn request; using defaults (AI {DefaultAi}).", LogLevel.WARNING);
 
             PendingBotSpawn p = _pending.Count > 0
                 ? _pending.Dequeue()
@@ -196,6 +213,7 @@ namespace MDS.Systems
         // Called on new round (StateTracker.NewRoundCleanup); bots are dropped from tracking.
         public static void Reset()
         {
+            _generation++;
             _bots.Clear();
             _pending.Clear();
             CharacterTracker.Reset();
@@ -234,13 +252,20 @@ namespace MDS.Systems
 
         private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor)
         {
+            // This runs on the DontDestroyOnLoad runner, so it keeps going across a map change. If the round
+            // turned over while we waited, the bot and its slot are already gone and the replacement would spawn
+            // into the new round carrying the old round's AI and placement, so drop the rest of the routine.
+            int generation = _generation;
+
             // 1) Wait so the killer is credited and the death plays out before the bot is removed.
             yield return new WaitForSeconds(KickDelaySeconds);
+            if (generation != _generation) yield break;
             KickBot(playerId);
 
             // 2) Spawn the replacement only after a short gap, so the kick fully frees the bot slot
             //    first (kicking and respawning back-to-back can make the spawnSpecific fail).
             yield return new WaitForSeconds(ReplaceDelaySeconds);
+            if (generation != _generation) yield break;
             SpawnReplacement(replacementSpec, ai, death, placement, predecessor);
         }
 
