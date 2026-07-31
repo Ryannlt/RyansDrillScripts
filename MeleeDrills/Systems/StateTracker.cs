@@ -90,7 +90,11 @@ namespace MDS.Systems
 
         public static void OnPlayerConnected(int playerId, bool isAutoAdmin, string backendId)
         {
-            _connectedPlayers.Add(playerId, false);
+            // Assign rather than Add: player ids are recycled, and Add throws on an id already in the dictionary.
+            // Throwing here is not contained by us, it propagates back into the game's authentication handler and
+            // aborts it partway, which leaves the connecting player without the faction, class, and uniform that
+            // were asked for. That is what made bots occasionally appear as a random class on the wrong side.
+            _connectedPlayers[playerId] = false;
             Logger.Log($"Player connected: {playerId}", LogLevel.DEBUG);
         }
 
@@ -121,6 +125,15 @@ namespace MDS.Systems
 
         public static void OnPlayerDisconnected(int playerId)
         {
+            // Everything keyed purely by id is dropped first, before the early return below. It has to run even
+            // for an id we no longer hold a player for: one that connected but never joined, or a bot the round
+            // cleanup already removed from _allPlayers. Those cases used to skip this entirely, so ids piled up
+            // for as long as the server stayed up, and since ids get recycled the leftovers eventually collided
+            // with a new connection or handed a replacement bot the previous holder's combat history.
+            _connectedPlayers.Remove(playerId);
+            CombatTracker.Clear(playerId);
+            CharacterTracker.Clear(playerId);
+
             var player = GetPlayerById(playerId);
             if (player == null) return;
 
@@ -129,7 +142,6 @@ namespace MDS.Systems
             _attackingPlayers.Remove(player);
             _defendingPlayers.Remove(player);
             _spectatorPlayers.Remove(player);
-            _connectedPlayers.Remove(playerId);
 
             if (player.IsBot)
             {

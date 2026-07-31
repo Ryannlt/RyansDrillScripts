@@ -92,6 +92,16 @@ namespace MDS.Systems
         // The attacker of playerId's last absorbed hit (as defender), or null if none seen.
         public static int? LastBlockAttacker(int playerId) => _lastBlockAttacker.TryGetValue(playerId, out int a) ? a : (int?)null;
 
+        // Drops one player's melee state, called when they leave. The game recycles player ids, so a replacement
+        // bot can be handed the id of the bot it replaced; without this it would inherit that bot's windup and
+        // block history and act on it immediately, for instance countering or engaging a player it never fought.
+        public static void Clear(int playerId)
+        {
+            _states.Remove(playerId);
+            _lastBlock.Remove(playerId);
+            _lastBlockAttacker.Remove(playerId);
+        }
+
         public static void Reset()
         {
             _states.Clear();
