@@ -72,6 +72,14 @@ namespace MDS.Systems
             CommandExecutor.ExecuteCommand($"{Prefix} inputRotation {Fmt(degrees)} {playerId}", logResult: false);
         }
 
+        // Vertical aim in degrees, 0 being level. This is a separate channel from inputRotation, which only
+        // carries the heading, and forcing input rotation does not pin it, so a bot left alone drifts to
+        // looking at the ground. Issued on spawn and re-asserted on a slow cadence, so it isn't result-logged.
+        public static void SetPitch(int playerId, float degrees)
+        {
+            CommandExecutor.ExecuteCommand($"{Prefix} pitch {Fmt(degrees)} {playerId}", logResult: false);
+        }
+
         public static void SetRunning(int playerId, bool enable)
         {
             CommandExecutor.ExecuteCommand($"{Prefix} setRunning {Bool(enable)} {playerId}");

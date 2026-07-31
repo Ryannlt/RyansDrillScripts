@@ -319,8 +319,16 @@ namespace MDS.Systems
 
         private static IEnumerator TickLoop()
         {
+            // Like the other delayed work, this runs on the DontDestroyOnLoad runner. If a tick loop from an
+            // earlier generation is somehow still alive (a stale coroutine handle, or statics reset out from
+            // under it), it would drive the same bots alongside the current loop and the two sets of input
+            // commands fight each other, leaving bots crawling back and forth. Exit as soon as that's detected.
+            int generation = _generation;
+
             while (_bots.Count > 0)
             {
+                if (generation != _generation) yield break;
+
                 float now = Time.realtimeSinceStartup;
 
                 // One shared snapshot of all spawned players/bots per tick, so neighbour-aware steering

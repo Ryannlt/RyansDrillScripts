@@ -16,8 +16,15 @@ namespace MDS.Systems
         public bool Initialized { get; private set; }
         public bool IsAwaitingKick { get; private set; }   // a death-kick is scheduled; ignore further deaths
 
+        // Bots never set their own vertical aim, and forcing input rotation only pins the heading, so left alone
+        // they drift into looking at the ground. Level pitch is re-asserted on this cadence, which is slow enough
+        // next to the 20 Hz movement commands to cost nothing.
+        private const float LevelPitchDegrees = 0f;
+        private const float PitchRefreshSeconds = 5f;
+
         private IBotAi _ai;
         private BotPlacement? _pendingPlacement;          // position + optional facing, applied on first spawn
+        private float _nextPitchRefresh;
         private readonly float _trackedAt = Time.realtimeSinceStartup;
 
         public BotController(IPlayer bot, IBotAi ai, BotSpawnSpec spec, BotDeathPolicy deathPolicy, BotPlacement? placement)
@@ -54,6 +61,9 @@ namespace MDS.Systems
                 Logger.Log($"Bot {PlayerId} initialized for input control.", LogLevel.DEBUG);
             }
 
+            CarbonPlayerCommands.SetPitch(PlayerId, LevelPitchDegrees);
+            _nextPitchRefresh = Time.realtimeSinceStartup + PitchRefreshSeconds;
+
             if (_pendingPlacement.HasValue)
             {
                 BotPlacement placement = _pendingPlacement.Value;
@@ -69,6 +79,14 @@ namespace MDS.Systems
         public void Tick(float deltaTime)
         {
             if (!Initialized) return;
+
+            // Hold the aim level. Only while actually spawned, so we don't command a corpse.
+            float now = Time.realtimeSinceStartup;
+            if (now >= _nextPitchRefresh && Bot.PlayerObject != null)
+            {
+                CarbonPlayerCommands.SetPitch(PlayerId, LevelPitchDegrees);
+                _nextPitchRefresh = now + PitchRefreshSeconds;
+            }
 
             BotIntent intent = _ai.Decide(this, deltaTime);
             ApplyIntent(intent);

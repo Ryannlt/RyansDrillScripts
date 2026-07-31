@@ -72,6 +72,14 @@ namespace MDS.Systems
         public static bool TryGetVelocity(int playerId, out Vector2 velocity) =>
             _velocity.TryGetValue(playerId, out velocity);
 
+        // Drops one player's tracked motion, called when they leave, so a recycled player id doesn't start with
+        // the previous holder's position and velocity.
+        public static void Clear(int playerId)
+        {
+            _lastPosition.Remove(playerId);
+            _velocity.Remove(playerId);
+        }
+
         // Cleared on round change so ids from the previous round don't linger.
         public static void Reset()
         {

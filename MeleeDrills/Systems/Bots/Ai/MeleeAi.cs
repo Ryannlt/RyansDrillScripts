@@ -99,6 +99,7 @@ namespace MDS.Systems
         private bool _threwFirst;             // this swing out-timed the enemy's, so commit to it harder
 
         // Stab-priority state: after our guard absorbs an attack we get a brief riposte window (Decide).
+        private bool _blockBaselinePending = true; // take the current block history as the baseline on the first tick
         private float _lastConsumedBlock;     // last block we reacted to as defender (dedupe)
         private float _riposteReadyAt;        // realtime before which we hold the guard (reaction beat) before countering
         private float _priorityUntil;         // while now < this: riposte immediately, don't re-block
@@ -174,6 +175,17 @@ namespace MDS.Systems
         {
             if (!self.TryGetPose(out BotPose pose))
                 return BotIntent.Idle; // not spawned, issue nothing
+
+            // Player ids are recycled, so a new bot can be handed an id that already carries block history from
+            // whoever held it before. Take whatever is on record as the baseline on the first tick, so only
+            // blocks that land from now on count as ours; otherwise a replacement would come back believing it
+            // had just blocked, and immediately counter or engage a player it never fought.
+            if (_blockBaselinePending)
+            {
+                _blockBaselinePending = false;
+                _lastConsumedBlock = CombatTracker.LastBlockTime(self.PlayerId);
+                _lastEngageBlock = _lastConsumedBlock;
+            }
 
             // Enter combat stance once so the bot can block and strike. Consumed only once actually spawned.
             if (_stancePending)
