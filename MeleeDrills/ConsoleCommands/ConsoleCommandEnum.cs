@@ -11,6 +11,7 @@ namespace MDS.ConsoleCommands
         ShootingTraining,
         Bot,
         SummonLine,
+        SummonLineAt,
         SpawnLine
         // Add more command types here as needed
     }

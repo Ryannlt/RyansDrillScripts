@@ -49,19 +49,25 @@ namespace MDS.ConsoleCommands
         {
             int applied = 0, skipped = 0;
             string lastError = null;
+            string advisory = null;   // e.g. the lever this one depends on is off, so it will sit dormant
 
             foreach (int id in BotTargetSelector.Resolve(target))
             {
                 if (FindController(id)?.Ai is IConfigurableAi cfg)
                 {
-                    if (cfg.TrySet(lever, value, out string error)) applied++;
-                    else { skipped++; lastError = error; }
+                    if (cfg.TrySet(lever, value, out string message))
+                    {
+                        applied++;
+                        if (!string.IsNullOrEmpty(message)) advisory = message;
+                    }
+                    else { skipped++; lastError = message; }
                 }
                 else skipped++;
             }
 
             string msg = applied > 0
                 ? $"Set '{lever}' = '{value}' on {applied} bot(s)." + (skipped > 0 ? $" ({skipped} skipped.)" : "")
+                  + (advisory != null ? $" Note: {advisory}" : "")
                 : lastError ?? $"No configurable bot matched '{target}'.";
             CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {msg}");
         }
@@ -73,9 +79,18 @@ namespace MDS.ConsoleCommands
                 BotController controller = FindController(id);
                 if (controller?.Ai is IConfigurableAi cfg)
                 {
+                    // Live levers first, then the dormant ones with what is holding them back. Listing 30-odd
+                    // levers flat made it impossible to see which of them this preset actually uses.
                     var sb = new StringBuilder($"Bot {id} ({controller.AiType}):");
-                    foreach (var (name, val) in cfg.ListParams())
-                        sb.Append($" {name}={val}");
+                    var dormant = new StringBuilder();
+
+                    foreach (var (name, val, inactive) in cfg.ListParams())
+                    {
+                        if (inactive == null) sb.Append($" {name}={val}");
+                        else dormant.Append($" {name}={val}(needs {inactive})");
+                    }
+
+                    if (dormant.Length > 0) sb.Append($" | inactive:{dormant}");
                     CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {sb}");
                 }
                 else

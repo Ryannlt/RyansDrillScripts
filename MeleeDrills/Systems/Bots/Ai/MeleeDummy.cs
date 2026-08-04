@@ -130,10 +130,11 @@ namespace MDS.Systems
             }
         }
 
-        public IEnumerable<(string name, string value)> ListParams()
+        // Both levers are always live: a stabbing dummy has no capability toggles for them to depend on.
+        public IEnumerable<(string name, string value, string inactive)> ListParams()
         {
-            yield return ("stabInterval", _stabInterval.ToString("0.##"));
-            yield return ("stabDirection", _stabDirection.ToString());
+            yield return ("stabInterval", _stabInterval.ToString("0.##"), null);
+            yield return ("stabDirection", _stabDirection.ToString(), null);
         }
 
         // Carry the dummy's config to a Replace-policy replacement so its tuning isn't lost on death.

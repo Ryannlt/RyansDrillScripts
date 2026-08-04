@@ -29,6 +29,7 @@ namespace MDS.ConsoleCommands
             RegisterCommand(new ShootingTrainingCommand());
             RegisterCommand(new BotCommand());
             RegisterCommand(new SummonLineCommand());
+            RegisterCommand(new SummonLineAtCommand());
             RegisterCommand(new SpawnLineCommand());
 
             Logger.Log($"Registered {commandRegistry.Count} predefined commands.", LogLevel.INFO);

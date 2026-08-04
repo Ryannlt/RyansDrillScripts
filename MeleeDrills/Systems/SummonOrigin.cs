@@ -26,16 +26,10 @@ namespace MDS.Systems
         // How long to wait for a packet before giving up on a free-roam summon.
         private const float ViewpointTimeoutSeconds = 2f;
 
-        // targetPlayerId: when given ('at <playerId>'), place at that player instead of the caller. This is the
-        // practical stand-in for free-roam summoning, which the packet route cannot serve.
-        public static void Resolve(int playerId, int? targetPlayerId, Action<BotPlacement> onResolved, Action<string> onFailed)
+        // The origin for a summon centred on the caller. To place at another player instead, callers use
+        // ResolveAtPlayer directly (see the summonAt commands).
+        public static void Resolve(int playerId, Action<BotPlacement> onResolved, Action<string> onFailed)
         {
-            if (targetPlayerId.HasValue)
-            {
-                ResolveAtPlayer(targetPlayerId.Value, onResolved, onFailed);
-                return;
-            }
-
             if (StateTracker.IsSpectator(playerId))
             {
                 ResolveFromViewpoint(playerId, onResolved, onFailed);
@@ -55,8 +49,9 @@ namespace MDS.Systems
 
         // Origin at another player's live position. Synchronous, since their transform is readable directly with
         // no packet needed. Refuses a target who isn't currently embodied, since PlayerObject would then be a
-        // stale corpse, the same trap the caller path avoids.
-        private static void ResolveAtPlayer(int targetPlayerId, Action<BotPlacement> onResolved, Action<string> onFailed)
+        // stale corpse, the same trap the caller path avoids. This is the route that works while the caller is in
+        // free roam, where the server never learns the caller's own position.
+        public static void ResolveAtPlayer(int targetPlayerId, Action<BotPlacement> onResolved, Action<string> onFailed)
         {
             IPlayer target = StateTracker.GetPlayerById(targetPlayerId);
             if (target == null)

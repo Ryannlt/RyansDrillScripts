@@ -30,7 +30,7 @@ namespace MDS.Systems
 
         // Spawns a shoulder-to-shoulder line of bots centred on 'center', all facing 'rotation' (deg from
         // North). 'right' is perpendicular to the facing (the line runs along it).
-        public static void SpawnLine(Vector2 center, float rotation, int count, float spacing, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death)
+        public static void SpawnLine(Vector2 center, float rotation, int count, float spacing, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, int? guardTargetId = null)
         {
             float rad = rotation * Mathf.Deg2Rad;
             Vector2 right = new Vector2(Mathf.Cos(rad), -Mathf.Sin(rad));
@@ -44,7 +44,7 @@ namespace MDS.Systems
                 placements.Add(new BotPlacement(new Vector3(pos2D.x, y, pos2D.y), rotation));
             }
 
-            BotManager.SpawnBotsAt(placements, spec, ai, death);
+            BotManager.SpawnBotsAt(placements, spec, ai, death, guardTargetId);
             Logger.Log($"SpawnLine: {count} bots, spacing {spacing:F2}, facing {rotation:F0} deg.", LogLevel.INFO);
         }
 

@@ -30,6 +30,8 @@ namespace MDS.ConfigVariables
             Seed(BotAiEnum.DuelingEasy, MeleeAi.DefaultLeversFor(BotAiEnum.DuelingEasy));
             Seed(BotAiEnum.DuelingNormal, MeleeAi.DefaultLeversFor(BotAiEnum.DuelingNormal));
             Seed(BotAiEnum.Dueling, MeleeAi.DefaultLeversFor(BotAiEnum.Dueling));
+            Seed(BotAiEnum.Guardian, MeleeAi.DefaultLeversFor(BotAiEnum.Guardian));
+            Seed(BotAiEnum.Test, MeleeAi.DefaultLeversFor(BotAiEnum.Test));
         }
 
         private void Seed(BotAiEnum aiType, IEnumerable<(string name, string value)> levers)
