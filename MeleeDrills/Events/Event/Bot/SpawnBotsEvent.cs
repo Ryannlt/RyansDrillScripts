@@ -4,7 +4,10 @@ namespace MDS.Events
 {
     // Spawns one or more bots. The COMMAND layer resolves caller context (faction/class, placement)
     // into explicit values; this event is caller-agnostic and reusable by drills.
-    // Parameters: (BotSpawnSpec spec | null for random, int count, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+    // Parameters: (BotSpawnSpec spec | null for random, int count, BotAiEnum ai, BotDeathPolicy death,
+    //              BotPlacement? placement, [int? guardTargetId])
+    // The optional sixth parameter names a player for a guardian AI to escort; the summon commands pass the
+    // player the bot was summoned onto.
     public class SpawnBotsEvent : IEvent
     {
         public EventEnum EventName => EventEnum.SpawnBots;
@@ -13,14 +16,15 @@ namespace MDS.Events
         {
             errorMessage = string.Empty;
 
-            if (parameters.Length != 5 ||
+            if ((parameters.Length != 5 && parameters.Length != 6) ||
                 !(parameters[0] is null || parameters[0] is BotSpawnSpec) ||
                 parameters[1] is not int count ||
                 parameters[2] is not BotAiEnum ai ||
                 parameters[3] is not BotDeathPolicy ||
-                !(parameters[4] is null || parameters[4] is BotPlacement))
+                !(parameters[4] is null || parameters[4] is BotPlacement) ||
+                (parameters.Length == 6 && !(parameters[5] is null || parameters[5] is int)))
             {
-                errorMessage = "Invalid parameters. Expected: (BotSpawnSpec|null, int count, BotAiEnum, BotDeathPolicy, BotPlacement? placement).";
+                errorMessage = "Invalid parameters. Expected: (BotSpawnSpec|null, int count, BotAiEnum, BotDeathPolicy, BotPlacement? placement, [int? guardTargetId]).";
                 return false;
             }
 
@@ -46,8 +50,9 @@ namespace MDS.Events
             var ai = (BotAiEnum)parameters[2];
             var death = (BotDeathPolicy)parameters[3];
             BotPlacement? placement = parameters[4] as BotPlacement?;
+            int? guardTargetId = parameters.Length == 6 ? parameters[5] as int? : null;
 
-            BotManager.SpawnBots(count, spec, ai, death, placement);
+            BotManager.SpawnBots(count, spec, ai, death, placement, guardTargetId: guardTargetId);
             Logger.Log($"SpawnBotsEvent: {count}x {(spec == null ? "random" : $"{FactionTokens.DisplayName(spec.Faction)}/{spec.Class}")}, AI {ai}, death {death}.", LogLevel.INFO);
         }
     }

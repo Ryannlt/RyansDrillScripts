@@ -156,7 +156,10 @@ namespace MDS
 
         public void OnDamageableObjectDamaged(GameObject damageableObject, int damageableObjectId, int shipId, int oldHp, int newHp) { }
 
-        public void OnPlayerKilledPlayer(int killerPlayerId, int victimPlayerId, EntityHealthChangedReason reason, string additionalDetails) { }
+        public void OnPlayerKilledPlayer(int killerPlayerId, int victimPlayerId, EntityHealthChangedReason reason, string additionalDetails)
+        {
+            if (isServer) BotManager.OnPlayerKilled(killerPlayerId, victimPlayerId);
+        }
 
         public void OnPlayerShoot(int playerId, bool dryShot) { }
 

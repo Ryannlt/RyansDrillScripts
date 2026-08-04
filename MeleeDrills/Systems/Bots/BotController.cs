@@ -13,6 +13,11 @@ namespace MDS.Systems
         public IBotAi Ai => _ai;                          // current AI instance (debug/manual control hooks)
         public BotSpawnSpec Spec { get; }                 // null for randomly-spawned bots
         public BotDeathPolicy DeathPolicy { get; private set; }
+
+        // The spawn batch this bot belongs to, 0 for none. Bots summoned by one command share one id for life,
+        // which is how SquadCoordinator can treat them as a formation before they have anyone to fight. A Replace
+        // replacement inherits it, so a station survives its members being killed.
+        public int GroupId { get; }
         public bool Initialized { get; private set; }
         public bool IsAwaitingKick { get; private set; }   // a death-kick is scheduled; ignore further deaths
 
@@ -27,13 +32,14 @@ namespace MDS.Systems
         private float _nextPitchRefresh;
         private readonly float _trackedAt = Time.realtimeSinceStartup;
 
-        public BotController(IPlayer bot, IBotAi ai, BotSpawnSpec spec, BotDeathPolicy deathPolicy, BotPlacement? placement)
+        public BotController(IPlayer bot, IBotAi ai, BotSpawnSpec spec, BotDeathPolicy deathPolicy, BotPlacement? placement, int groupId = 0)
         {
             Bot = bot;
             _ai = ai;
             Spec = spec;
             DeathPolicy = deathPolicy;
             _pendingPlacement = placement;
+            GroupId = groupId;
         }
 
         public void SetAi(IBotAi ai)
@@ -64,6 +70,8 @@ namespace MDS.Systems
             CarbonPlayerCommands.SetPitch(PlayerId, LevelPitchDegrees);
             _nextPitchRefresh = Time.realtimeSinceStartup + PitchRefreshSeconds;
 
+            WarnIfSpawnedAsSomethingElse();
+
             if (_pendingPlacement.HasValue)
             {
                 BotPlacement placement = _pendingPlacement.Value;
@@ -74,6 +82,20 @@ namespace MDS.Systems
                 Logger.Log($"Bot {PlayerId} placed at {placement.Position}{(placement.Heading.HasValue ? $" facing {placement.Heading.Value:F0} deg" : "")}.", LogLevel.DEBUG);
                 _pendingPlacement = null;
             }
+        }
+
+        // The game does not always spawn the bot we asked for: a full team or a class that has hit its cap gets
+        // silently substituted, which is how a bot ordered onto one side turns up on the other, or as a cannoneer
+        // when a guard was asked for. Nothing here can force it, so at least say so in the log rather than leaving
+        // it to be discovered in the field.
+        private void WarnIfSpawnedAsSomethingElse()
+        {
+            if (Spec == null || !Bot.Faction.HasValue) return;
+            if (Bot.Faction.Value == Spec.Faction && Bot.PlayerClass == Spec.Class) return;
+
+            Logger.Log($"Bot {PlayerId} spawned as {FactionTokens.DisplayName(Bot.Faction.Value)}/{Bot.PlayerClass}, "
+                       + $"but {FactionTokens.DisplayName(Spec.Faction)}/{Spec.Class} was requested. The game substituted it, "
+                       + "usually because that team is full or the class is capped.", LogLevel.WARNING);
         }
 
         public void Tick(float deltaTime)

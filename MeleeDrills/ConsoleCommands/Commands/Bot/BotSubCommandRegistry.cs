@@ -39,6 +39,7 @@ namespace MDS.ConsoleCommands
             Register(new SpawnSubCommand());
             Register(new SpawnRandomSubCommand());
             Register(new SummonSubCommand());
+            Register(new SummonAtSubCommand());
             Register(new SetBotAiSubCommand());
             Register(new SetBotDeathPolicySubCommand());
             Register(new RemoveSubCommand());
