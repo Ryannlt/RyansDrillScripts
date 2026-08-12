@@ -442,11 +442,11 @@ Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot 
 | `None` | Does nothing. Stands where it spawned. |
 | `Manual` | Manually driven with `rc bot move` (a movement test harness: seek, arrive, flee, pursue, evade, wander, face…). Issues no orders on its own. |
 | `StabbingDummy` | Static training dummy. Stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking and attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
-| `RiposteDummy` | Reactive melee. Stands its ground, blocks, and only counters once provoked, never throwing first. A patient sparring partner: walk up and attack it, and it blocks and ripostes. |
-| `Guardian` | Bodyguard. Escorts the player it was summoned onto, holding station beside them and staying out of trouble until an enemy comes within `guardRange` (10m) of them or they get into melee themselves, then it fights like a duellist. It takes sides from the **guarded player**, not from its own body, so it never turns on them even if the game spawned it on the wrong team. It also keeps its distance from other bots, so a group of guards is less likely to cut each other down. |
-| `Test` | Development sandbox, not a finished behaviour. Carries `Dueling`'s levers plus whatever feature is under construction — currently **squad** fighting without the station cycle. Expect it to change. |
-| `DuelingEasy` / `DuelingNormal` / `Dueling` | Sentry melee at three difficulty tiers. Stays passive, reading and blocking the closest player in range, until a player attacks it and it blocks the hit; then it locks onto that attacker and fights to the death, returning to passive when the target dies. Responds to human players only (`ignoreBots`). The tiers differ only in reaction speed: `DuelingEasy` is sluggish and beatable, `DuelingNormal` is human, plain `Dueling` has instant blocks and ripostes. Duel bots **fight as individuals** — no shared reads or timed stabs — but several attacked by the same player take up a formation so they stop crowding and cutting each other down. They also hold a post: wait on the mark you put them on, hold where a bout ended for `returnDelay`, then walk back. |
-| `GroupEasy` / `GroupNormal` / `Group` | Drill station for practising being outnumbered, at the same three difficulty tiers as the `Dueling` family. See **[Group drill stations](#group-drill-stations)** below: stand a batch up somewhere, and it waits until a player attacks one of them, backs off to re-form, fights as a coordinated formation, and returns to its post afterwards ready for the next player. |
+| `RiposteDummy` | Stands its ground, blocks, and only counters once provoked, never throwing first. Walk up and attack it, and it blocks and ripostes. |
+| `Guardian` | Escorts the player it was summoned onto, holding station beside them and staying out of trouble until an enemy comes within `guardRange` of them or they get into melee themselves, then it fights like a duellist. |
+| `Test` | Current development testing settings. |
+| `DuelingEasy` / `DuelingNormal` / `Dueling` | A duelling practice bot. Stays passive, reading and blocking the closest player in range, until a player attacks it and it blocks the hit; then it locks onto that attacker and fights to the death, returning to passive when the target dies. The tiers differ only in reaction speed: `DuelingEasy` is sluggish and beatable, `DuelingNormal` is human, plain `Dueling` has instant blocks and ripostes. Duel bots **fight as individuals**, so no shared reads or timed stabs, but several attacked by the same player take up a formation so they stop crowding and cutting each other down.|
+| `GroupEasy` / `GroupNormal` / `Group` | Drill station for practising 1vXs, at the same three difficulty tiers as the `Dueling` family. See **[Group drill stations](#group-drill-stations)** below: stand a batch up somewhere, and it waits until a player attacks one of them, backs off to re-form, fights as a coordinated formation, and returns to its post afterwards ready for the next player. |
 
 `RiposteDummy` and the `Dueling` and `Group` tiers are presets of one configurable melee AI: the same behaviour with different capability toggles (`press`, `riposte`, `move`, `pursue`, `engageOnAttack`, `squad`, `post`) and tuning. `StabbingDummy` is a separate static-stabber AI. You can tweak any of them per bot with `rc bot cfg`.
 
@@ -458,9 +458,7 @@ A `Group` bot is for practising 2v1s and 3v1s on your own. Summon a batch and le
 rc summonLine 2 Defending ArmyLineInfantry Group Replace
 ```
 
-**Batch vs formation.** Bots from one `summonLine`, `spawnLine`, or `rc bot summon <count>` are a batch: they share a post, wake together, and a `Replace` bot rejoins the one it came from. A formation is who a bot fights beside — any engaged batches on the **same player** merge into one line with shared guard, alternating stabs and lane discipline, then split back to their own posts afterwards.
-
-That means you can build a group by walking separately summoned bots onto the same player. Three converged bots play exactly like a summoned three: one lifecycle, provoking any wakes all, and `minMembers` / `holdReplacement` count the assembled size. They hold together through the bout and `returnDelay`, then each returns to its own post.
+**Batch vs formation.** Bots from one `summonLine`, `spawnLine`, or `rc bot summon <count>` are a batch: they share a post, wake together, and a `Replace` bot rejoins the one it came from. A formation is the group a bot fights alongside. Any engaged batches on the **same player** merge into one line with shared guard, alternating stabs and lane discipline, then split back to their own posts afterwards. That means you can build a group by walking separately summoned bots onto the same player. Three converged bots play exactly like a summoned three: one lifecycle, provoking any wakes all, and `minMembers` / `holdReplacement` count the assembled size. They hold together through the bout and `returnDelay`, then each returns to its own post.
 
 **The cycle:**
 
@@ -531,7 +529,7 @@ rc bot cfg <id> stabDirection High
 
 **Difficulty** comes in two halves: reaction beats (how fast a bot answers you) and formation levers `coordinate`, `slotError` and `formationLag` (how well it holds its place beside another bot). The second half matters more in a group — reactions alone give you a slow pair that still stands in a perfect line and throws perfectly opposite stabs.
 
-Every formation lever is **the worst a bot may be, not how bad it is**. Each roll runs from zero up to the lever, so a bot can come out correct by chance and a lower tier just does so less often — a pair that is *usually* too wide has to be read every bout instead of solved once. `squadSpacing` stays at `0.9` for every tier; only the stray from it changes.
+Every formation lever is **the worst a bot may be, not how bad it is**. Each roll runs from zero up to the lever, so a bot can come out correct by chance and a lower tier just does so less often. A pair that is *usually* too wide has to be read every bout instead of solved once. `squadSpacing` stays at `0.9` for every tier; only the stray from it changes.
 
 **Reaction beats**: the levers that separate the tiers (`seconds ≥ 0`). The `Group` tiers use the same three columns as their `Dueling` counterparts:
 
@@ -542,8 +540,6 @@ Every formation lever is **the worst a bot may be, not how bad it is**. Each rol
 | `riposteReactionMin` | `0.4` | `0` | `0.2` | `0` | `0` | Min delay between a block landing and the counter. |
 | `riposteReactionMax` | `1.1` | `0.5` | `0.8` | `0.5` | `0` | Max of that delay. |
 | `attackReadBeat` | `1.2` | `0.6` | `0.9` | `0.6` | `0.3` | Extra randomised beat added to the attack cooldown (pacing; lower = presses faster). |
-
-`Guardian` sits deliberately below `DuelingEasy`: a guard should buy its ward a moment and lose to a competent player, and a whole detail of them would be miserable to fight otherwise.
 
 **Shared tuning**: same defaults across all these presets (`seconds ≥ 0` or `metres`, floats):
 
