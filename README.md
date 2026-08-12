@@ -580,7 +580,7 @@ Every formation lever is **the worst a bot may be, not how bad it is** — each 
 | `formationLag` | `1.2` Easy, `0.6` Normal, `0` top tier | The longest a bot may work from a stale slot, in seconds. It re-checks where it should be on a randomised interval up to this, so it is late reacting when you press in, back off, or run around the formation — sometimes badly late, sometimes barely at all. At `0` it tracks perfectly. Needs `squad`. |
 | `post` | `true` for `Dueling*` / `Group*` / `Test`, `false` otherwise | Make it a drill station: remember where it was set up, wait there until provoked, and walk back afterwards, whether it won or was killed and replaced. This is why a duel bot stays on the mark you put it on instead of drifting to wherever its last fight happened to end. Independent of `squad`, so it works on a single bot of any melee preset — on a `RiposteDummy` pair it with `move true`, or there is nothing for it to walk back with. On a group it also means all of them wake together. See **[Group drill stations](#group-drill-stations)**. |
 | `breakoff` | `false` (`true` for `Group*`) | Once provoked, retreat to `breakoffRange` and re-form before throwing anything, so the bout starts from a clean approach rather than from wherever the provoking blow landed. The out-of-range fight for stab priority is most of the skill, and this is what makes the drill rehearse it. Needs `post`, since it is the step between waiting and fighting; with `post` on and this off, a provoked bot piles straight in. |
-| `breakoffRange` | `6` | How far it retreats when breaking off. The dial on how much approach room the drill gives you: raise it for a longer run-in, lower it to get to blows sooner. Only used while `breakoff` is on. |
+| `breakoffRange` | `4` | How far it retreats when breaking off. The dial on how much approach room the drill gives you: raise it for a longer run-in, lower it to get to blows sooner. Kept short by default because a player who does not know the bots want their distance first will simply walk after them, and a long retreat then reads as the bots running away rather than as the drill resetting. Only used while `breakoff` is on. |
 | `resetRange` | `0` | How far the target may get from the post before the group gives up on the bout. **`0`, the default, removes the limit** (same convention as `targetRange` and `separationRange`): a bout then ends when it is won or lost, not when someone steps away from it, which is usually what you want — backing off to reset your spacing should not call the fight off. Set it to a distance to fence the drill into an area instead, in which case wandering past that range also ends the bout. Only used while `post` is on. |
 | `minMembers` | `0` (`2` for `Group*`) | The fewest members the batch will fight with. Drop below it and the bout is over: the group withdraws, returns to the post, and will not be provoked again until it is back up to strength. `0` means it fights on however few are left. Set it to the smallest count the drill is still *about* — on a trio, `2` keeps a 3v1 running as a 2v1 after you kill one and only calls it when the next death would make it a 1v1; on a pair, `2` ends the bout the moment one dies. **Capped by the batch's own size**, which is what makes one value work at every size: a bot summoned on its own is a batch of one whose drill is a 1v1, so `2` simply does not apply to it. Needs the `Replace` death policy to recover: with `Kick` or `None` nobody comes back and the station stays shut. Only used while `post` is on.<br><br>It also decides **how long a formation lasts.** Above `0` the group is a standing unit: it holds together through the bout and its `returnDelay`, which is what lets bots you gathered by walking them onto one player keep working as a group. At `0` the formation is an ad-hoc line that breaks up the moment the bout ends, so each bot has to be provoked again — which is what keeps duellists from inheriting a group they merely stood next to once. |
 | `holdReplacement` | `false` (`true` for `Group*`) | A dead member's replacement waits for the bout to finish instead of walking back into it. This is what makes `minMembers` mean anything: without it a 3v1 is a 2v1 for a few seconds and then a 3v1 again, so the shorthanded fight never really happens. Replacements appear once the group is between bouts. Capped at two minutes, so a drill nobody ever finishes cannot swallow a bot for good. Set it `false` for an endurance grind where bots keep feeding in mid-fight. Only used while `post` is on. |
@@ -797,6 +797,36 @@ mod_variable_local MDS:SpawnBot:0,0,90,defending,ArmyLineInfantry,Dueling,Replac
 mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
 mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
 ```
+
+---
+
+## Building
+
+Everything under `MeleeDrills/` is compiled by Unity as part of the normal mod build — nothing extra to do.
+
+The one exception is **`MDS.GameAccess.dll`**, which reads the game's own internals to answer "is this player an
+admin". It cannot be compiled by Unity, because it references the game's `Assembly-CSharp` and there is no way to
+give Unity that reference without breaking the project. Its sources live in `GameAccess~/` — the trailing `~`
+makes Unity ignore the folder entirely, so the code sits in the repo without ever being compiled into
+`Assembly-CSharp`.
+
+After editing anything in `GameAccess~/`, rebuild it:
+
+```powershell
+powershell -File "GameAccess~/build.ps1"
+```
+
+then switch to Unity so it re-imports the DLL, and build the mod as usual. **The DLL is committed, so nothing
+warns you if it drifts out of step with its sources** — the rebuild is manual by design.
+
+`MDS.GameAccess.dll.meta` is committed too, via an explicit exception to the blanket `*.meta` rule in
+`.gitignore`. It carries `validateReferences: 0`, without which Unity tries to validate the DLL's reference to a
+game assembly that is not in the project.
+
+If `GameAccess` cannot reach the game (off-server, or mid map change), admin checks fall back to MDS's own
+tracking from `OnRCLogin` and `OnRCCommand`. That fallback only ever sees admins who typed a password — a
+whitelisted admin produces no server-side callback at all — so the DLL is what makes admin detection work on a
+server-only deployment.
 
 ---
 

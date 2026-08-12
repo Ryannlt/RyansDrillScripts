@@ -18,6 +18,12 @@ namespace MDS.Systems
         // which is how SquadCoordinator can treat them as a formation before they have anyone to fight. A Replace
         // replacement inherits it, so a station survives its members being killed.
         public int GroupId { get; }
+
+        // The heading this bot was asked to face when it was placed, kept after the placement itself is consumed.
+        // Anything deciding which way a bot is "meant" to look must use this rather than the live transform: the
+        // engine turns toward inputRotation over time, so reading the transform in the moments after a spawn
+        // catches the turn half done, or not begun. Null for bots placed without a heading.
+        public float? SpawnHeading { get; private set; }
         public bool Initialized { get; private set; }
         public bool IsAwaitingKick { get; private set; }   // a death-kick is scheduled; ignore further deaths
 
@@ -77,7 +83,10 @@ namespace MDS.Systems
                 BotPlacement placement = _pendingPlacement.Value;
                 CarbonPlayerCommands.Teleport(PlayerId, placement.Position);
                 if (placement.Heading.HasValue)
+                {
                     CarbonPlayerCommands.SetInputRotation(PlayerId, placement.Heading.Value);
+                    SpawnHeading = placement.Heading;
+                }
 
                 Logger.Log($"Bot {PlayerId} placed at {placement.Position}{(placement.Heading.HasValue ? $" facing {placement.Heading.Value:F0} deg" : "")}.", LogLevel.DEBUG);
                 _pendingPlacement = null;

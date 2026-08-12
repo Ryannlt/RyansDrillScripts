@@ -108,3 +108,8 @@ InitTestScene*.unity*
 *.meta
 Editor/
 .claude/
+
+# ...but this one meta must be tracked. It carries validateReferences: 0, without which a fresh clone has Unity
+# validate the DLL's reference to a game assembly that is not in the project, and it pins the asset GUID so the
+# asset identity does not move between clones.
+!MDS.GameAccess.dll.meta
