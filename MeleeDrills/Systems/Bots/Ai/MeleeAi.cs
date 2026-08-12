@@ -114,6 +114,7 @@ namespace MDS.Systems
         private string _attackDir;            // "High" or "Low" for the strike in progress
         private float _attackCooldownUntil;   // realtime before which we won't start another strike
         private float _strikeReadyAt;         // realtime the bot may first swing at all, set on spawn (SpawnStrikeDelay)
+        private bool _releasePending;         // a dropped windup still needs releasing, or the engine keeps cycling it
         private float _chamberStartedAt;      // realtime our windup began (for the "I threw first" read)
         private float _executeAt;             // realtime to release the held windup
         private bool _threwFirst;             // this swing out-timed the enemy's, so commit to it harder
@@ -178,6 +179,18 @@ namespace MDS.Systems
             if (_provokedBy is int provoker && !IsCandidate(self, StateTracker.GetPlayerById(provoker), ignoreRange: true))
                 _provokedBy = null;
 
+            // Let go of a windup that was dropped rather than thrown. A raw MeleeStrike latches the engine's
+            // attack loop and only ExecuteMeleeWeaponStrike or a block stops it, so abandoning a chamber any
+            // other way leaves the bot cycling stabs on its own while nothing in here believes it is attacking.
+            // The places that drop one - losing the target, being stood down, going back to escorting - have no
+            // action channel at the time, so they flag it and the release goes out here.
+            if (_releasePending)
+            {
+                _releasePending = false;
+                _attackCooldownUntil = Time.realtimeSinceStartup + MissedStabDuration;
+                return new BotIntent { Action = "ExecuteMeleeWeaponStrike", MoveAxis = Vector2.zero };
+            }
+
             // Enter combat stance once so the bot can block and strike. Consumed only once actually spawned, which
             // makes it the moment the bot enters the world and so where the no-swinging-yet window starts.
             if (_stancePending)
@@ -222,7 +235,7 @@ namespace MDS.Systems
 
             if (target?.PlayerObject == null)
             {
-                _attackPhase = AttackPhase.None; // don't resume a stale chamber when a target is reacquired
+                AbandonChamber(); // don't resume a stale chamber when a target is reacquired
 
                 // Nobody to fight. A bot with a slot walks back to it and faces the way the line faces, which is
                 // what returns a station to its post once the drill is over rather than leaving it wherever the
@@ -519,6 +532,17 @@ namespace MDS.Systems
             intent.Action = "MeleeStrike" + _attackDir;
         }
 
+        // Drop a windup for a reason other than throwing or blocking it: the target is gone, the group has been
+        // stood down, the bot is back to escorting. Forgetting the chamber is not enough - the engine is still
+        // cycling the attack until something ends it - so the release is queued for the next tick, when there is
+        // an action channel to send it on. Blocking is the one case that does NOT come through here, because a
+        // block cancels the windup by itself.
+        private void AbandonChamber()
+        {
+            if (_attackPhase == AttackPhase.Chamber) _releasePending = true;
+            _attackPhase = AttackPhase.None;
+        }
+
         // Which way to swing, given what the formation would like. coordinate runs from 0 to 1 with chance in the
         // middle: the top half is the odds of deliberately making an updown, the bottom half the odds of
         // deliberately refusing one, and anything not decided that way is a free pick.
@@ -708,7 +732,7 @@ namespace MDS.Systems
         // reads as part of their line rather than staring at them.
         private BotIntent GuardIntent(BotController self, BotPose pose, IPlayer ward)
         {
-            _attackPhase = AttackPhase.None; // don't carry a chamber into the lull
+            AbandonChamber(); // don't carry a chamber into the lull
 
             Transform wardTransform = ward.PlayerObject.transform;
             Vector2 wardPos = new Vector2(wardTransform.position.x, wardTransform.position.z);
@@ -979,7 +1003,7 @@ namespace MDS.Systems
             _engaged = false;
             _engagedTargetId = null;
             _provokedBy = null;   // spent; leaving it set would re-wake the station the instant it got home
-            _attackPhase = AttackPhase.None;
+            AbandonChamber();
         }
 
         // Carry the per-bot lever overrides and any pinned target to a Replace replacement, so a bot tuned with

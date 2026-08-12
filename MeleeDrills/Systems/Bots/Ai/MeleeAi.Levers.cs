@@ -122,7 +122,7 @@ namespace MDS.Systems
                 ("breakoff", "false"),      // and only some of those reset the distance before fighting
                 // resetRange 0 = no distance limit: a bout ends when it is won or lost, not when someone steps
                 // away from it. Tidying the arena afterwards is returnDelay's job, not this one's.
-                ("breakoffRange", "6"), ("resetRange", "0"),
+                ("breakoffRange", "4"), ("resetRange", "0"),
                 ("minMembers", "0"),          // 0 = fight on however few are left
                 ("holdReplacement", "false"), // only a drill with a group size worth preserving holds one back
                 ("returnDelay", "30"),        // hold where the bout ended long enough to be used again straight away

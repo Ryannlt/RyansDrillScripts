@@ -86,6 +86,10 @@ namespace MDS.Systems
         // hold it in the withdrawing state indefinitely and keep the station from re-arming.
         private const float WithdrawTimeout = 10f;
 
+        // How far from its post a formation will follow anything at all, whatever resetRange says. Not a tuning
+        // value: it is the backstop that stops a group walking off the map behind a target it cannot reach.
+        private const float MaxChaseFromPost = 120f;
+
         // Per-group state. Anchor and phase both outlive any individual member, which is what lets a station
         // survive its bots being killed and replaced.
         private class GroupState
@@ -266,20 +270,27 @@ namespace MDS.Systems
                     // would re-point this pair and leave the rest of an existing formation still following the
                     // old lead, quietly splitting it in half. Lowest only decides it when both are loose, which
                     // keeps that case stable whatever order they are seen in.
+                    int lead;
                     if (otherLead != other.Key)
                     {
-                        _memberOf[group.Key] = otherLead;
+                        lead = otherLead;
                     }
                     else
                     {
-                        int lead = Mathf.Min(group.Key, other.Key);
-                        _memberOf[group.Key] = lead;
+                        lead = Mathf.Min(group.Key, other.Key);
                         _memberOf[other.Key] = lead;
                     }
 
-                    // Its own fight state is meaningless from here: it follows the lead's. Cleared so nothing can
-                    // read it back as a live target later.
-                    _groups[group.Key].TargetId = null;
+                    _memberOf[group.Key] = lead;
+
+                    // Clear what the FOLLOWERS were fighting - their own state stops being stepped from here, and
+                    // a frozen target left lying around is what let a later provocation match a fight that had
+                    // already finished. The lead's target is the formation's and has to survive: wiping it leaves
+                    // the whole group with nothing to fight, which in game looks like a merge that instantly
+                    // forgets the player and has to be provoked all over again. Which of the pair leads depends on
+                    // ids, not on the order they are walked in, so this cannot be decided by position in the loop.
+                    if (group.Key != lead) _groups[group.Key].TargetId = null;
+                    if (other.Key != lead) _groups[other.Key].TargetId = null;
                     break;
                 }
             }
@@ -593,16 +604,37 @@ namespace MDS.Systems
         {
             IPlayer target = state.TargetId is int id ? StateTracker.GetPlayerById(id) : null;
             if (!IsLiveTarget(target)) return false;
-            if (settings.ResetRange <= 0f) return true;
 
             Vector3 t = target.PlayerObject.transform.position;
-            return Vector2.Distance(new Vector2(t.x, t.z), state.Post) <= settings.ResetRange;
+            float fromPost = Vector2.Distance(new Vector2(t.x, t.z), state.Post);
+
+            // Safety rail rather than a drill setting. resetRange 0 deliberately removes the tuned limit, but it
+            // removes with it the only thing that can free a group locked onto something it can never reach - and
+            // the anchor follows the target, so the formation walks wherever that goes. Set far enough out that
+            // no real drill will touch it: past this the fight is a bug, not a long chase.
+            if (fromPost > MaxChaseFromPost) return false;
+
+            return settings.ResetRange <= 0f || fromPost <= settings.ResetRange;
         }
 
         // Spawned AND alive. The aliveness check is the important half: a corpse keeps its PlayerObject for a
         // moment after death, so testing the object alone leaves the group swinging at a body, and at whoever
         // respawns on that id, for the tick or two before it is cleaned up.
         private static bool IsLiveTarget(IPlayer target) => target?.PlayerObject != null && target.IsAlive;
+
+        // The bearing a fresh group posts on. Taken from what each bot was ASKED to face, not from where it is
+        // currently looking. The engine turns a bot toward inputRotation over time, so founding a post off live
+        // transforms catches that turn half finished - and the error then sticks for good, because a posted bot
+        // spends its idle time holding the bearing its post records. Falls back to the live value for a bot
+        // placed without a heading, which has no requested bearing to honour.
+        private static float PostHeadingOf(List<BotController> members)
+        {
+            Vector2 sum = Vector2.zero;
+            for (int i = 0; i < members.Count; i++)
+                sum += MovementSolver.DirectionFromHeading(members[i].SpawnHeading ?? members[i].Heading ?? 0f);
+
+            return sum.sqrMagnitude > 1e-4f ? MovementSolver.HeadingOf(sum) : 0f;
+        }
 
         // Average bearing of the members right now. Summed as direction vectors rather than as degrees: averaging
         // the numbers would take 350 and 10 to 180 and point the formation backwards.
@@ -650,7 +682,7 @@ namespace MDS.Systems
             if (members.Count <= state.FoundedCount) return state;
 
             state.Post = MeanPosition(members);
-            state.PostHeading = MeanHeading(members);
+            state.PostHeading = PostHeadingOf(members);
             state.RestHeading = state.PostHeading;   // never fought yet, so it rests the way it was set up
             state.Anchor = state.Post;
             state.FoundedCount = members.Count;
