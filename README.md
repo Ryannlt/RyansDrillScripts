@@ -792,11 +792,18 @@ mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Re
 Unity can't compile, so it's built separately. Sources are in `GameAccess~/`. The trailing `~` makes Unity ignore
 the folder.
 
+Open `GameAccess~/MDS.GameAccess.csproj` in your IDE to get IntelliSense against the game types. It references the
+game's assemblies straight out of its `Managed` folder, so nothing has to be imported into Unity. Set `ManagedDir`
+at the top of the csproj if the game is installed elsewhere.
+
 After editing anything in `GameAccess~/`:
 
-```powershell
-powershell -File "GameAccess~/build.ps1"
 ```
+dotnet build "GameAccess~/MDS.GameAccess.csproj"
+```
+
+That writes the DLL to the mod folder. `GameAccess~/build.ps1` does the same thing by calling Roslyn directly, as
+a fallback if MSBuild is unavailable.
 
 Then switch to Unity to re-import the DLL and build the mod as usual. The DLL is committed and the rebuild is
 manual, so nothing warns you if it drifts out of step with its sources.

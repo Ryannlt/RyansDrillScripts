@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Builds MDS.GameAccess.dll against the game's own assemblies, entirely outside Unity.
+
+    This exists so the game DLLs never enter the Unity project. Importing Holdfast's Assembly-CSharp with Auto
+    Reference on hands it to every assembly in the project, and it carries ~393 global-namespace types plus
+    bundled copies of TriangleNet, Discord, Rewired and others, which collide with packages you cannot edit.
+    ShaderGraph's Rotate is one such clash and ShaderGraph cannot be removed, since URP depends on it.
+
+    Opening this .csproj in an IDE gives full IntelliSense against the game types. Unity never sees any of it:
+    the folder ends in "~", so the asset database skips it entirely.
+
+    Update ManagedDir if the game is installed elsewhere.
+  -->
+
+  <PropertyGroup>
+    <ManagedDir>D:\SteamLibrary\steamapps\common\Holdfast Nations At War - Beta\Holdfast NaW_Data\Managed</ManagedDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>MDS.GameAccess</AssemblyName>
+    <RootNamespace>MDS.Core</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+
+    <!-- Use the game's own mscorlib rather than a framework reference pack, matching how Unity compiles. -->
+    <NoStdLib>true</NoStdLib>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+
+    <!-- Keep the output to a single DLL. Anything else written next to the mod would be picked up as an asset. -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <DebugType>none</DebugType>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="mscorlib">                 <HintPath>$(ManagedDir)\mscorlib.dll</HintPath>                 </Reference>
+    <Reference Include="System">                   <HintPath>$(ManagedDir)\System.dll</HintPath>                   </Reference>
+    <Reference Include="System.Core">              <HintPath>$(ManagedDir)\System.Core.dll</HintPath>              </Reference>
+    <Reference Include="netstandard">              <HintPath>$(ManagedDir)\netstandard.dll</HintPath>              </Reference>
+    <Reference Include="UnityEngine">              <HintPath>$(ManagedDir)\UnityEngine.dll</HintPath>              </Reference>
+    <Reference Include="UnityEngine.CoreModule">   <HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath>   </Reference>
+    <Reference Include="Assembly-CSharp">          <HintPath>$(ManagedDir)\Assembly-CSharp.dll</HintPath>          </Reference>
+  </ItemGroup>
+
+  <!--
+    Copy only the DLL up into the mod folder, where UMod's AssemblyScriptProcessor picks it up. bin/ and obj/ stay
+    inside the ignored "~" folder so Unity and the mod build never see the intermediate files.
+  -->
+  <Target Name="CopyToModFolder" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MSBuildProjectDirectory)\..\" />
+    <Message Importance="high" Text="Copied $(TargetFileName) to the mod folder. Switch to Unity to re-import it." />
+  </Target>
+
+</Project>
