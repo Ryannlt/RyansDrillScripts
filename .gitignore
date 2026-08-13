@@ -113,3 +113,11 @@ Editor/
 # validate the DLL's reference to a game assembly that is not in the project, and it pins the asset GUID so the
 # asset identity does not move between clones.
 !MDS.GameAccess.dll.meta
+
+# Build intermediates for the GameAccess DLL. The root-anchored obj/ rule above does not reach into a subfolder.
+GameAccess~/bin/
+GameAccess~/obj/
+
+# This csproj is hand-written and is the only way to build the GameAccess DLL, so it is not covered by the
+# blanket *.csproj rule for Unity's generated project files.
+!GameAccess~/MDS.GameAccess.csproj
