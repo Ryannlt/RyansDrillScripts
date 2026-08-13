@@ -39,10 +39,15 @@ namespace MDS.ConsoleCommands
             Register(new SpawnSubCommand());
             Register(new SpawnRandomSubCommand());
             Register(new SummonSubCommand());
+            Register(new SummonAtSubCommand());
             Register(new SetBotAiSubCommand());
             Register(new SetBotDeathPolicySubCommand());
             Register(new RemoveSubCommand());
             Register(new ListSubCommand());
+            Register(new MoveSubCommand());
+            Register(new ProbeSubCommand());
+            Register(new ActSubCommand());
+            Register(new CfgSubCommand());
 
             Logger.Log($"Total bot sub-commands registered: {registry.Count}", LogLevel.INFO);
         }

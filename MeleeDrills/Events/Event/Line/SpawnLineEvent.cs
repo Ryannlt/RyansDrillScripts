@@ -6,7 +6,10 @@ namespace MDS.Events
 {
     // Command-facing trigger for a bot line. Validates the param shape then delegates the actual
     // geometry/spawn to LineManager.SpawnLine (shared with the map-load auto-populate path).
-    // Parameters: (Vector2 center, float rotation, int count, float spacing, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death)
+    // Parameters: (Vector2 center, float rotation, int count, float spacing, BotSpawnSpec spec, BotAiEnum ai,
+    //              BotDeathPolicy death, [int? guardTargetId])
+    // The optional eighth parameter names a player for a guardian AI to escort, set when the line was summoned
+    // onto someone.
     public class SpawnLineEvent : IEvent
     {
         public EventEnum EventName => EventEnum.SpawnLine;
@@ -15,16 +18,17 @@ namespace MDS.Events
         {
             errorMessage = string.Empty;
 
-            if (parameters.Length != 7 ||
+            if ((parameters.Length != 7 && parameters.Length != 8) ||
                 parameters[0] is not Vector2 ||
                 parameters[1] is not float ||
                 parameters[2] is not int count ||
                 parameters[3] is not float spacing ||
                 parameters[4] is not BotSpawnSpec ||
                 parameters[5] is not BotAiEnum ai ||
-                parameters[6] is not BotDeathPolicy)
+                parameters[6] is not BotDeathPolicy ||
+                (parameters.Length == 8 && !(parameters[7] is null || parameters[7] is int)))
             {
-                errorMessage = "Invalid parameters. Expected: (Vector2 center, float rotation, int count, float spacing, BotSpawnSpec, BotAiEnum, BotDeathPolicy).";
+                errorMessage = "Invalid parameters. Expected: (Vector2 center, float rotation, int count, float spacing, BotSpawnSpec, BotAiEnum, BotDeathPolicy, [int? guardTargetId]).";
                 return false;
             }
 
@@ -44,8 +48,9 @@ namespace MDS.Events
             var spec = (BotSpawnSpec)parameters[4];
             var ai = (BotAiEnum)parameters[5];
             var death = (BotDeathPolicy)parameters[6];
+            int? guardTargetId = parameters.Length == 8 ? parameters[7] as int? : null;
 
-            LineManager.SpawnLine(center, rotation, count, spacing, spec, ai, death);
+            LineManager.SpawnLine(center, rotation, count, spacing, spec, ai, death, guardTargetId);
         }
     }
 }

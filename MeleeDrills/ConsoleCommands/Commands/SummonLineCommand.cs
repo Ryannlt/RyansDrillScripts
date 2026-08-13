@@ -5,7 +5,9 @@ using MDS.Systems;
 namespace MDS.ConsoleCommands
 {
     // rc summonLine [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // Forms a shoulder-to-shoulder line of bots centred on the caller, facing the caller's direction.
+    // Forms a shoulder-to-shoulder line of bots centred on the caller, facing the caller's direction. Faction and
+    // class default to the caller's. To centre the line on another player instead, which is the route that works
+    // from free roam, use 'rc summonLineAt <playerId>'.
     public class SummonLineCommand : IConsoleCommand
     {
         public ConsoleCommandEnum CommandName => ConsoleCommandEnum.SummonLine;
@@ -21,18 +23,15 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            var caller = StateTracker.GetPlayerById(playerId);
-            if (caller?.PlayerObject == null)
-            {
-                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Cannot summon line - your position is unavailable (are you spawned?).");
-                return;
-            }
-
-            Transform t = caller.PlayerObject.transform;
-            Vector2 center = new Vector2(t.position.x, t.position.z);
-            float rotation = t.eulerAngles.y;
-
-            LineArgs.Trigger(playerId, center, rotation, count, spec);
+            // The caller's body when embodied, else their free-roam viewpoint (the corpse would otherwise be used).
+            SummonOrigin.Resolve(playerId,
+                placement =>
+                {
+                    // The caller doubles as the guard target, so a line of Guardians escorts whoever summoned it.
+                    Vector2 center = new Vector2(placement.Position.x, placement.Position.z);
+                    LineArgs.Trigger(playerId, center, placement.Heading ?? 0f, count, spec, playerId);
+                },
+                reason => CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {reason}"));
         }
     }
 }

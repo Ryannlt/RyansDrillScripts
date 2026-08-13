@@ -2,10 +2,10 @@ using System.Globalization;
 using UnityEngine;
 using MDS.Core;
 
-// The ONLY place that knows the Holdfast 'carbonPlayers' console-command vocabulary and quirks.
-// All bot control funnels through here so the (undocumented) quirks stay quarantined to one file.
-// Commands are issued WITHOUT the 'rc' prefix because CommandExecutor.ExecuteConsoleCommand runs
-// the command that would follow 'rc' (matches existing usage, e.g. ShootingTrainingEvent's "set ...").
+// The one place that knows the Holdfast 'carbonPlayers' console-command vocabulary and quirks. All bot control
+// funnels through here so the undocumented quirks stay quarantined to one file. Commands are issued without the
+// 'rc' prefix because CommandExecutor.ExecuteConsoleCommand runs the command that would follow 'rc' (matching
+// existing usage, e.g. ShootingTrainingEvent's "set ...").
 
 namespace MDS.Systems
 {
@@ -59,16 +59,25 @@ namespace MDS.Systems
             CommandExecutor.ExecuteCommand($"{Prefix} forceInputRotation false {playerId}");
         }
 
-        // sideways/forwards each in [-1, 1].
+        // sideways/forwards each in [-1, 1]. Issued every tick per bot, so its result is not logged
+        // (logResult: false) - otherwise it floods the debug log. Failures still surface.
         public static void SetInputAxis(int playerId, float sideways, float forwards)
         {
-            CommandExecutor.ExecuteCommand($"{Prefix} inputAxis {Fmt(sideways)} {Fmt(forwards)} {playerId}");
+            CommandExecutor.ExecuteCommand($"{Prefix} inputAxis {Fmt(sideways)} {Fmt(forwards)} {playerId}", logResult: false);
         }
 
-        // heading in degrees from North.
+        // heading in degrees from North. Per-tick like inputAxis, so likewise not result-logged.
         public static void SetInputRotation(int playerId, float degrees)
         {
-            CommandExecutor.ExecuteCommand($"{Prefix} inputRotation {Fmt(degrees)} {playerId}");
+            CommandExecutor.ExecuteCommand($"{Prefix} inputRotation {Fmt(degrees)} {playerId}", logResult: false);
+        }
+
+        // Vertical aim in degrees, 0 being level. This is a separate channel from inputRotation, which only
+        // carries the heading, and forcing input rotation does not pin it, so a bot left alone drifts to
+        // looking at the ground. Issued on spawn and re-asserted on a slow cadence, so it isn't result-logged.
+        public static void SetPitch(int playerId, float degrees)
+        {
+            CommandExecutor.ExecuteCommand($"{Prefix} pitch {Fmt(degrees)} {playerId}", logResult: false);
         }
 
         public static void SetRunning(int playerId, bool enable)
@@ -76,7 +85,7 @@ namespace MDS.Systems
             CommandExecutor.ExecuteCommand($"{Prefix} setRunning {Bool(enable)} {playerId}");
         }
 
-        // Performs a Player Action. QUIRK: a held action (e.g. a melee strike direction like
+        // Performs a Player Action. Quirk: a held action (e.g. a melee strike direction like
         // MeleeStrikeHigh) stays held until released with ExecuteMeleeWeaponStrike. Some actions
         // also won't fire while the bot is mid-other-action. See:
         // https://wiki.holdfastgame.com/Server_Configuration_Enums#Player_Actions
@@ -91,24 +100,31 @@ namespace MDS.Systems
             CommandExecutor.ExecuteCommand($"{Prefix} playerAction {action} {argument} {playerId}");
         }
 
-        // Removes a bot from the world. There is no carbonPlayers despawn command, so we kick the
-        // bot by id. Note 'serverAdmin kick' is a serverAdmin command, NOT carbonPlayers-prefixed.
-        // The resulting disconnect fires OnPlayerDisconnected -> BotManager.OnBotDisconnected, which
-        // untracks it (untrack is idempotent, so the direct untrack in BotManager is also fine).
+        // Removes a bot from the world. There is no carbonPlayers despawn command, so we kick the bot by id.
+        // 'serverAdmin kick' is a serverAdmin command, not carbonPlayers-prefixed. The resulting disconnect fires
+        // OnPlayerDisconnected, then BotManager.OnBotDisconnected, which untracks it (untrack is idempotent, so
+        // the direct untrack in BotManager is also fine).
         public static void Despawn(int playerId)
         {
             CommandExecutor.ExecuteCommand($"serverAdmin kick {playerId}");
         }
 
-        // Teleports a player/bot to a world position. NOTE: 'teleport' is a general console command,
-        // not carbonPlayers-prefixed. Used for summon and (Slice B) return-to-death placement.
+        // Teleports a player or bot to a world position. 'teleport' is a general console command, not
+        // carbonPlayers-prefixed. Used for summon and return-to-death placement.
         public static void Teleport(int playerId, Vector3 position)
         {
             CommandExecutor.ExecuteCommand($"teleport {playerId} {Fmt(position.x)},{Fmt(position.y)},{Fmt(position.z)}");
         }
 
-        // A positional name/regtag arg, or the placeholder when empty.
-        private static string Arg(string value) => string.IsNullOrEmpty(value) ? EmptyArgPlaceholder : value;
+        // A positional name/regtag arg, or the placeholder when empty. Any ASCII space is swapped for an en space
+        // (U+2002) so the value can't split spawnSpecific's own space-delimited positional args. This matters for
+        // Replace: the game hands player names back with the en-space normalised to a regular space, so a
+        // replacement's captured name like "Named Bot" would otherwise split ("Bot" into regtag, "none" into
+        // uniformId) and fail to spawn.
+        private static string Arg(string value) =>
+            string.IsNullOrEmpty(value) ? EmptyArgPlaceholder : value.Replace(' ', NameSpaceChar);
+
+        private const char NameSpaceChar = '\u2002'; // EN SPACE: renders as a space in-game, not an arg delimiter
 
         // Invariant culture so floats never serialize with a locale comma decimal separator.
         private static string Fmt(float value) => value.ToString(CultureInfo.InvariantCulture);

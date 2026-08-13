@@ -14,6 +14,17 @@ namespace MDS.Systems
         static BotAiFactory()
         {
             Register(BotAiEnum.None, () => new NoneAi());
+            Register(BotAiEnum.Manual, () => new ManualAi());
+            Register(BotAiEnum.StabbingDummy, () => new MeleeDummy());
+            Register(BotAiEnum.RiposteDummy, () => new MeleeAi(BotAiEnum.RiposteDummy));
+            Register(BotAiEnum.DuelingEasy, () => new MeleeAi(BotAiEnum.DuelingEasy));
+            Register(BotAiEnum.DuelingNormal, () => new MeleeAi(BotAiEnum.DuelingNormal));
+            Register(BotAiEnum.Dueling, () => new MeleeAi(BotAiEnum.Dueling));
+            Register(BotAiEnum.Guardian, () => new MeleeAi(BotAiEnum.Guardian));
+            Register(BotAiEnum.GroupEasy, () => new MeleeAi(BotAiEnum.GroupEasy));
+            Register(BotAiEnum.GroupNormal, () => new MeleeAi(BotAiEnum.GroupNormal));
+            Register(BotAiEnum.Group, () => new MeleeAi(BotAiEnum.Group));
+            Register(BotAiEnum.Test, () => new MeleeAi(BotAiEnum.Test));
 
             Logger.Log($"Registered {_factories.Count} bot AI type(s).", LogLevel.INFO);
         }

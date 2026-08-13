@@ -8,15 +8,15 @@ namespace MDS.ConsoleCommands
 {
     // Parses the shared positional spawn grammar used by 'spawn' and 'summon':
     //   [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // - faction/class: provide both or neither; omitted => default to the caller's faction/class.
+    // - faction/class: provide both or neither; omitted means default to the caller's faction/class.
     //   faction accepts attacking/defending (resolved to the round's factions) or a FactionCountry name.
-    // - ai/death: omitted => config defaults (botDefaultAi / botDefaultDeathPolicy); provide inline to override.
+    // - ai/death: omitted means config defaults (botDefaultAi / botDefaultDeathPolicy); provide inline to override.
     // - name/regtag/uniformId: require an explicit faction+class.
     // Strict positional order:
     //   [count] [faction [class]] [ai] [death] [name [regtag [uniformId]]]
-    // - Neither faction nor class   -> both default to caller's.
-    // - Faction only (no class)     -> faction explicit, class defaults to caller's.
-    // - Both faction and class      -> both explicit.
+    // - Neither faction nor class: both default to the caller's.
+    // - Faction only (no class): faction explicit, class defaults to the caller's.
+    // - Both faction and class: both explicit.
     // The ai and death slots, if present, MUST parse as a valid AI / death policy - a wrong token
     // errors rather than being silently taken as a name.
     public class BotSpawnArgs
@@ -237,8 +237,8 @@ namespace MDS.ConsoleCommands
                     return false;
                 }
 
-                name = args[i++];
-                if (i < args.Length) regTag = args[i++];
+                name = DecodeSpaces(args[i++]);
+                if (i < args.Length) regTag = DecodeSpaces(args[i++]);
                 if (i < args.Length)
                 {
                     if (!int.TryParse(args[i], out int uid))
@@ -258,6 +258,18 @@ namespace MDS.ConsoleCommands
 
             return true;
         }
+
+        // Bot names/regtags are single positional args, so a literal space would be split by BOTH our parser
+        // and the game's spawnSpecific command. To allow spaces, type SpacePlaceholder ('_') where you want
+        // one; it is swapped for U+2002 EN SPACE - a Unicode space that renders normally in-game but is NOT
+        // the ASCII space (U+0020) either parser splits on. Any stray ASCII space (only the comma-delimited
+        // SpawnLine config var could smuggle one into a name) is converted too. U+2002 is the char Commander
+        // Battles used and is confirmed to display; change SpaceChar for a different width.
+        private const char SpacePlaceholder = '_';
+        private const char SpaceChar = '\u2002';   // EN SPACE (U+2002)
+
+        private static string DecodeSpaces(string token) =>
+            token?.Replace(SpacePlaceholder, SpaceChar).Replace(' ', SpaceChar);
 
         private struct Parsed
         {

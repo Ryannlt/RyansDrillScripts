@@ -31,19 +31,20 @@ namespace MDS.ConsoleCommands
 
         // Core dispatch: builds line params from the resolved spec + live config spacing and triggers
         // SpawnLineEvent. Caller-agnostic (no player messaging) - shared by the command and map-load paths.
-        public static bool TriggerLine(Vector2 center, float rotation, int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, out string error)
+        public static bool TriggerLine(Vector2 center, float rotation, int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, out string error, int? guardTargetId = null)
         {
             float spacing = ((LineSpacingConfigurable)ConfigurableRegistry.Get(ConfigurableEnum.LineSpacing)).LineSpacing;
 
             return EventDispatcher.Trigger(EventEnum.SpawnLine,
-                new object[] { center, rotation, count, spacing, spec, ai, death },
+                new object[] { center, rotation, count, spacing, spec, ai, death, guardTargetId },
                 out error);
         }
 
-        // Builds the line from a resolved spec and messages the calling admin with the outcome.
-        public static void Trigger(int playerId, Vector2 center, float rotation, int count, BotSpawnArgs spec)
+        // Builds the line from a resolved spec and messages the calling admin with the outcome. guardTargetId is
+        // the player the line was summoned onto, so a line of guardians escorts them.
+        public static void Trigger(int playerId, Vector2 center, float rotation, int count, BotSpawnArgs spec, int? guardTargetId = null)
         {
-            if (!TriggerLine(center, rotation, count, spec.Spec, spec.Ai, spec.Death, out string error))
+            if (!TriggerLine(center, rotation, count, spec.Spec, spec.Ai, spec.Death, out string error, guardTargetId))
             {
                 Logger.Log($"SpawnLine failed: {error}", LogLevel.WARNING);
                 CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {error}");

@@ -1,4 +1,3 @@
-using UnityEngine;
 using MDS.Core;
 using MDS.Events;
 using MDS.Systems;
@@ -6,7 +5,9 @@ using MDS.Systems;
 namespace MDS.ConsoleCommands
 {
     // rc bot summon [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // Spawns a single bot (no count - multiple would stack on one spot) then teleports it to the caller.
+    // Spawns a single bot (no count, since multiple would stack on one spot) then teleports it to the caller.
+    // Faction and class default to the caller's. To place the bot at another player instead, which is the route
+    // that works from free roam, use 'rc bot summonAt <playerId>'.
     public class SummonSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Summon;
@@ -22,27 +23,25 @@ namespace MDS.ConsoleCommands
                 return;
             }
 
-            var caller = StateTracker.GetPlayerById(playerId);
-            if (caller?.PlayerObject == null)
-            {
-                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Cannot summon - your position is unavailable (are you spawned?).");
-                return;
-            }
-            Transform callerTransform = caller.PlayerObject.transform;
-            var placement = new BotPlacement(callerTransform.position, callerTransform.eulerAngles.y);
+            // The caller's body when embodied, else their free-roam viewpoint (the corpse would otherwise be used).
+            SummonOrigin.Resolve(playerId,
+                placement =>
+                {
+                    // The caller doubles as the guard target, so 'summon ... Guardian' escorts whoever summoned it.
+                    bool success = EventDispatcher.Trigger(EventEnum.SpawnBots,
+                        new object[] { parsed.Spec, parsed.Count, parsed.Ai, parsed.Death, placement, playerId },
+                        out string eventError);
 
-            bool success = EventDispatcher.Trigger(EventEnum.SpawnBots,
-                new object[] { parsed.Spec, parsed.Count, parsed.Ai, parsed.Death, placement },
-                out string eventError);
+                    if (!success)
+                    {
+                        Logger.Log($"Summon failed: {eventError}", LogLevel.WARNING);
+                        CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {eventError}");
+                        return;
+                    }
 
-            if (!success)
-            {
-                Logger.Log($"Summon failed: {eventError}", LogLevel.WARNING);
-                CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {eventError}");
-                return;
-            }
-
-            CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning bot: {FactionTokens.DisplayName(parsed.Spec.Faction)}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
+                    CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} Summoning bot: {FactionTokens.DisplayName(parsed.Spec.Faction)}/{parsed.Spec.Class}, AI {parsed.Ai}, death {parsed.Death}.");
+                },
+                reason => CommandExecutor.ExecuteCommand($"serverAdmin privateMessage {playerId} {reason}"));
         }
     }
 }

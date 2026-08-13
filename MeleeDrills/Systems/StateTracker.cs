@@ -11,6 +11,7 @@ namespace MDS.Systems
     public class StateTracker
     {
         private static bool _initialized = false;
+        private static bool _warnedGameAccessUnavailable;
         private static bool _isServer;
         private static int _roundId;
         private static string _serverName;
@@ -88,9 +89,17 @@ namespace MDS.Systems
             BotManager.Reset();
         }
 
+        // isAutoAdmin is deliberately ignored: the game hardcodes it. There is a single call site for the callback
+        // in the whole of Assembly-CSharp and it passes isAutoAdmin: false literally, so it carries no
+        // information about whitelisted admins and never will until the game changes. Whitelisted admins reach us
+        // through GameAccess.IsAdmin instead - see IsPlayerAdmin below.
         public static void OnPlayerConnected(int playerId, bool isAutoAdmin, string backendId)
         {
-            _connectedPlayers.Add(playerId, false);
+            // Assign rather than Add: player ids are recycled, and Add throws on an id already in the dictionary.
+            // Throwing here is not contained by us, it propagates back into the game's authentication handler and
+            // aborts it partway, which leaves the connecting player without the faction, class, and uniform that
+            // were asked for. That is what made bots occasionally appear as a random class on the wrong side.
+            _connectedPlayers[playerId] = false;
             Logger.Log($"Player connected: {playerId}", LogLevel.DEBUG);
         }
 
@@ -107,7 +116,9 @@ namespace MDS.Systems
             }
             else
             {
-                bool isAdmin = _connectedPlayers.TryGetValue(playerId, out var isCurrentlyAdmin);
+                // Both halves matter. TryGetValue's return says only that the id was seen connecting, and
+                // OnPlayerConnected registers every id, so using it alone marked every human player an admin.
+                bool isAdmin = _connectedPlayers.TryGetValue(playerId, out bool isCurrentlyAdmin) && isCurrentlyAdmin;
                 newPlayer = new Player(playerId, steamId, playerName, regimentTag, isAdmin);
             }
 
@@ -121,6 +132,15 @@ namespace MDS.Systems
 
         public static void OnPlayerDisconnected(int playerId)
         {
+            // Everything keyed purely by id is dropped first, before the early return below. It has to run even
+            // for an id we no longer hold a player for: one that connected but never joined, or a bot the round
+            // cleanup already removed from _allPlayers. Those cases used to skip this entirely, so ids piled up
+            // for as long as the server stayed up, and since ids get recycled the leftovers eventually collided
+            // with a new connection or handed a replacement bot the previous holder's combat history.
+            _connectedPlayers.Remove(playerId);
+            CombatTracker.Clear(playerId);
+            CharacterTracker.Clear(playerId);
+
             var player = GetPlayerById(playerId);
             if (player == null) return;
 
@@ -129,7 +149,6 @@ namespace MDS.Systems
             _attackingPlayers.Remove(player);
             _defendingPlayers.Remove(player);
             _spectatorPlayers.Remove(player);
-            _connectedPlayers.Remove(playerId);
 
             if (player.IsBot)
             {
@@ -186,6 +205,8 @@ namespace MDS.Systems
             var player = GetPlayerById(playerId);
             if (player == null) return;
 
+            player.MarkDead(); // the corpse's PlayerObject lingers, so flag death explicitly (bot AIs skip the dead)
+
             Logger.Log($"Player {playerId} died.", LogLevel.DEBUG);
 
             if (player.IsBot)
@@ -200,6 +221,12 @@ namespace MDS.Systems
             _attackingPlayers.Remove(player);
             _defendingPlayers.Remove(player);
 
+            // No longer a body on the field, so nothing may treat them as one. Their PlayerObject reference
+            // survives spectating and freeflight, so without this a bot stays locked onto a camera that can go
+            // anywhere - which is how a group ended up marching off the edge of the map, and refusing to break
+            // off, because a formation only accepts a new provocation once its current fight has ended.
+            player.MarkDead();
+
             if (!_spectatorPlayers.Contains(player))
                 _spectatorPlayers.Add(player);
 
@@ -212,9 +239,13 @@ namespace MDS.Systems
             var player = GetPlayerById(playerId);
             if (player is Player p)
             {
-                p.IsAdmin = isLoggedIn;
+                // Only ever grant here, never revoke. This callback fires for a typed password, and a whitelisted
+                // admin who mistypes one is still an admin - assigning isLoggedIn straight across demoted them.
+                if (isLoggedIn) p.IsAdmin = true;
+
                 Logger.Log($"Player {p.PlayerId} login attempt: {(isLoggedIn ? "Granted" : "Denied")}", LogLevel.DEBUG);
-                CommandExecutor.SendClientLog(playerId, "Logged in as admin.");
+
+                if (isLoggedIn) CommandExecutor.SendClientLog(playerId, "Logged in as admin.");
                 return;
             }
 
@@ -264,6 +295,20 @@ namespace MDS.Systems
 
         public static bool IsPlayerAdmin(int playerId)
         {
+            // The game's own answer wins when we can get it. ServerRemoteConsoleAccessManager.IsLoggedIn covers
+            // both routes into admin - a typed password and a serverAdmins whitelist entry - where our tracked
+            // flag only ever sees the first, because a whitelisted auto-admin produces no server-side callback at
+            // all. That gap is why admin detection could not work with MDS deployed server-only.
+            if (GameAccess.TryIsAdmin(playerId, out bool authoritative)) return authoritative;
+
+            // Could not ask - off-server, mid-map-change, or an id the game has no authentication record for
+            // (every bot lands here). Fall back to what we tracked rather than denying.
+            if (!_warnedGameAccessUnavailable)
+            {
+                _warnedGameAccessUnavailable = true;
+                Logger.Log("GameAccess unavailable; falling back to tracked admin flags.", LogLevel.DEBUG);
+            }
+
             return _allPlayers.FirstOrDefault(p => p.PlayerId == playerId) is Player player && player.IsAdmin;
         }
 

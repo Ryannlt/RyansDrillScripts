@@ -26,9 +26,17 @@ namespace MDS.ConsoleCommands
                 return false;
             }
 
-            if (!EnumParser.TryParseEnumStrict(args[1], out BotAiEnum _))
+            if (!EnumParser.TryParseEnumStrict(args[1], out BotAiEnum ai))
             {
                 errorMessage = $"Unknown AI '{args[1]}'. Valid: {string.Join(", ", Enum.GetNames(typeof(BotAiEnum)))}.";
+                return false;
+            }
+
+            // A name can exist in the enum before its AI is wired up in BotAiFactory. Reject those cleanly
+            // instead of letting the factory fall back to a do-nothing bot.
+            if (!BotAiFactory.IsRegistered(ai))
+            {
+                errorMessage = $"AI '{ai}' is not available yet.";
                 return false;
             }
 

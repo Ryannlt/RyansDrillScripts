@@ -5,10 +5,10 @@ using UnityEngine;
 using MDS.ConfigVariables;
 using MDS.Core;
 
-// Central bot subsystem: spawns/tracks bots, assigns AI + death policy, and runs a single tick
-// coroutine that lives only while >=1 bot is active. Bots are dropped each new round (mirrors
-// StateTracker) and auto-clear on map change via assembly reload. Lifecycle hooks are called by
-// StateTracker. The COMMAND layer resolves caller context; this layer takes explicit data only.
+// Central bot subsystem: spawns and tracks bots, assigns AI and death policy, and runs a single tick
+// coroutine that lives only while at least one bot is active. Bots are dropped each new round (mirroring
+// StateTracker) and auto-clear on map change via assembly reload. Lifecycle hooks are called by StateTracker.
+// The command layer resolves caller context; this layer takes explicit data only.
 
 namespace MDS.Systems
 {
@@ -16,6 +16,11 @@ namespace MDS.Systems
     {
         private const float TickInterval = 0.05f;                 // 20 Hz - tunable
         private const float GhostTimeoutSeconds = 5f;             // drop bots that joined but never spawned
+        // Give up on a spawn request the game never delivered a bot for. Joining bots are paired with requests in
+        // arrival order, so a request that never lands would otherwise sit at the front of the queue and hand the
+        // next bot to join the wrong placement, spec and AI. Bots normally join within a second, and a ten-bot
+        // formation under a full server took about five, so this is well clear of legitimate latency.
+        private const float PendingSpawnTimeoutSeconds = 15f;
 
         // Defaults + timings read live from configurables (settable via rc set / map config variables).
         private static BotAiEnum DefaultAi =>
@@ -31,15 +36,42 @@ namespace MDS.Systems
         private static readonly Queue<PendingBotSpawn> _pending = new();
         private static Coroutine _tickRoutine;
 
+        // Bumped whenever tracking is torn down (new round, remove all). Delayed work runs on the
+        // DontDestroyOnLoad coroutine runner, so it outlives a map change; anything scheduled in an earlier
+        // generation must not spawn into the current one. A stale replacement would enqueue a pending entry
+        // holding the previous round's AI and placement, and since joining bots are paired with pending entries
+        // in arrival order, that one stale entry shifts every assignment after it.
+        private static int _generation;
+
+        // How long a held replacement will wait for its group's bout to finish, and how often it checks. The cap
+        // matters: a drill nobody ever finishes would otherwise swallow the bot permanently.
+        private const float ReplacementHoldTimeout = 120f;
+        private const float ReplacementHoldPoll = 0.5f;
+
+        // Handed out one per spawn batch, so bots summoned together can be recognised as a formation later. Never
+        // reused within a session, so a stale id can't quietly adopt a bot into a group it was never part of.
+        private static int _nextGroupId = 1;
+
         public static IReadOnlyList<BotController> Bots => _bots;
 
-        // ---- Command surface ----
+        // Read by other systems that schedule delayed spawns (see LineManager) so they can drop stale work.
+        public static int Generation => _generation;
 
-        // spec == null => fully random spawn (carbonPlayers spawn). placement positions/faces each bot on spawn.
-        public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        // Command surface.
+
+        // spec null means a fully random spawn (carbonPlayers spawn). placement positions and faces each bot on spawn.
+        // predecessor is supplied only by the Replace path, so the replacement can resume the dead bot's
+        // standing order (see IBotAi.InheritFrom); every other caller leaves it null.
+        // guardTargetId is set by the summon commands so a guardian AI escorts the player it was summoned onto.
+        // groupId 0 means "this is a new batch", so every ordinary summon forms its own group; the Replace path
+        // passes the dead bot's id instead, so a replacement rejoins the station it came from.
+        public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor = null, int? guardTargetId = null, int groupId = 0)
         {
+            float requestedAt = Time.realtimeSinceStartup;
+            if (groupId == 0) groupId = _nextGroupId++;
+
             for (int i = 0; i < count; i++)
-                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement });
+                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement, Predecessor = predecessor, RequestedAt = requestedAt, GuardTargetId = guardTargetId, GroupId = groupId });
 
             if (spec == null)
             {
@@ -55,7 +87,8 @@ namespace MDS.Systems
         }
 
         // Spawns one bot per placement, all sharing the same spec/ai/death (used by line formations).
-        public static void SpawnBotsAt(IReadOnlyList<BotPlacement> placements, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death)
+        // guardTargetId is set when the line was summoned onto a player, so a guardian AI escorts them.
+        public static void SpawnBotsAt(IReadOnlyList<BotPlacement> placements, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, int? guardTargetId = null)
         {
             if (spec == null)
             {
@@ -63,9 +96,12 @@ namespace MDS.Systems
                 return;
             }
 
+            float requestedAt = Time.realtimeSinceStartup;
+            int groupId = _nextGroupId++;   // a line is one formation
+
             foreach (var placement in placements)
             {
-                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement });
+                _pending.Enqueue(new PendingBotSpawn { Spec = spec, Ai = ai, Death = death, Placement = placement, RequestedAt = requestedAt, GuardTargetId = guardTargetId, GroupId = groupId });
                 CarbonPlayerCommands.SpawnSpecific(spec);
             }
 
@@ -104,22 +140,44 @@ namespace MDS.Systems
             foreach (var bot in _bots.ToList())
                 CarbonPlayerCommands.Despawn(bot.PlayerId);
 
+            _generation++; // drop any scheduled replacement, so a removed bot can't come back
             _bots.Clear();
             _pending.Clear();
+            SquadCoordinator.Reset();   // the formations went with the bots; Reset() does the same on a new round
             StopTicking();
         }
 
-        // ---- Lifecycle hooks (called by StateTracker) ----
+        // Lifecycle hooks (called by StateTracker).
 
         public static void OnBotJoined(IPlayer bot)
         {
             if (_bots.Any(b => b.PlayerId == bot.PlayerId)) return;
 
+            // Clear out expired requests first: this bot must never be paired with one from minutes ago.
+            PrunePendingSpawns();
+
+            // Joining bots are paired with spawn requests in arrival order, since the join callback carries no
+            // link back to the request. A bot with no pending request is therefore unexpected (something spawned
+            // it outside the mod, or the queue desynced) and it falls back to the configured defaults.
+            if (_pending.Count == 0)
+                Logger.Log($"Bot {bot.PlayerId} joined with no pending spawn request; using defaults (AI {DefaultAi}).", LogLevel.WARNING);
+
             PendingBotSpawn p = _pending.Count > 0
                 ? _pending.Dequeue()
                 : new PendingBotSpawn { Spec = null, Ai = DefaultAi, Death = DefaultDeathPolicy, Placement = null };
 
-            _bots.Add(new BotController(bot, BotAiFactory.Create(p.Ai), p.Spec, p.Death, p.Placement));
+            IBotAi ai = BotAiFactory.Create(p.Ai);
+
+            // A Replace replacement resumes the standing order of the bot it replaces; without this it would
+            // come back identical in every respect except that it had forgotten what it was doing.
+            if (p.Predecessor != null)
+                ai.InheritFrom(p.Predecessor);
+
+            // A bot summoned onto a player escorts them, if its AI knows how to.
+            if (p.GuardTargetId is int wardId && ai is IGuardianAi guardian)
+                guardian.SetGuardTarget(wardId);
+
+            _bots.Add(new BotController(bot, ai, p.Spec, p.Death, p.Placement, p.GroupId));
             Logger.Log($"Bot {bot.PlayerId} tracked (AI {p.Ai}, death {p.Death}). Active bots: {_bots.Count}.", LogLevel.INFO);
 
             EnsureTicking();
@@ -145,6 +203,13 @@ namespace MDS.Systems
             float? deathHeading = controller.Heading;
             BotSpawnSpec spec = BuildReplacementSpec(controller);
             BotAiEnum ai = controller.AiType;
+            IBotAi predecessorAi = controller.Ai;   // Replace: lets the replacement resume its standing order
+            int groupId = controller.GroupId;       // Replace: keeps the replacement in its formation
+
+            // Whether the replacement should wait out the bout instead of walking straight back into it. Without
+            // this a 3v1 is briefly a 2v1 and then a 3v1 again, so the shorthanded fight the drill is about never
+            // actually happens.
+            bool holdReplacement = groupId != 0 && controller.Ai is MeleeAi melee && melee.HoldReplacement;
 
             switch (policy)
             {
@@ -173,9 +238,20 @@ namespace MDS.Systems
                     }
 
                     Logger.Log($"Bot {bot.PlayerId} died (policy: Replace). Kicking in {KickDelaySeconds}s and respawning at {deathPos.Value}.", LogLevel.INFO);
-                    ScheduleDeathKick(bot.PlayerId, spec, ai, policy, new BotPlacement(deathPos.Value, deathHeading));
+                    ScheduleDeathKick(bot.PlayerId, spec, ai, policy, new BotPlacement(deathPos.Value, deathHeading), predecessorAi, groupId, holdReplacement);
                     break;
             }
+        }
+
+        // A player killed someone. Only interesting when the victim was one of our bots in a formation: a stab
+        // clean enough to kill before the guard rises never registers as a block, so without this the rest of a
+        // drill station would go on waiting while its partner was cut down in front of it.
+        public static void OnPlayerKilled(int killerPlayerId, int victimPlayerId)
+        {
+            var victim = _bots.FirstOrDefault(b => b.PlayerId == victimPlayerId);
+            if (victim == null) return;
+
+            SquadCoordinator.OnMemberKilled(victim.GroupId, victimPlayerId, killerPlayerId);
         }
 
         public static void OnBotDisconnected(int playerId)
@@ -186,18 +262,47 @@ namespace MDS.Systems
         // Called on new round (StateTracker.NewRoundCleanup); bots are dropped from tracking.
         public static void Reset()
         {
+            _generation++;
             _bots.Clear();
             _pending.Clear();
+            CharacterTracker.Reset();
+            MeleeProbe.Reset();
+            CombatTracker.Reset();
+            SquadCoordinator.Reset();
             StopTicking();
             Logger.Log("BotManager reset.", LogLevel.DEBUG);
         }
 
-        // ---- Internals ----
+        // Internals.
+
+        // Drops spawn requests the game never delivered a bot for. A request can go unanswered when the spawn is
+        // refused (the carbon-bot limit) or the join is aborted, and since bots are paired with requests in
+        // arrival order, a leftover would be handed to the next bot to join, giving it the wrong placement, spec
+        // and AI for the rest of the round. Requests are enqueued in time order, so expired ones are always at
+        // the front.
+        private static void PrunePendingSpawns()
+        {
+            float now = Time.realtimeSinceStartup;
+
+            while (_pending.Count > 0 && now - _pending.Peek().RequestedAt > PendingSpawnTimeoutSeconds)
+            {
+                PendingBotSpawn stale = _pending.Dequeue();
+                Logger.Log($"Spawn request (spec {(stale.Spec == null ? "random" : $"{FactionTokens.DisplayName(stale.Spec.Faction)}/{stale.Spec.Class}")}, AI {stale.Ai}) never produced a bot within {PendingSpawnTimeoutSeconds}s - discarded.", LogLevel.WARNING);
+            }
+        }
 
         private static void Untrack(int playerId)
         {
+            int groupId = _bots.FirstOrDefault(b => b.PlayerId == playerId)?.GroupId ?? 0;
+
             int removed = _bots.RemoveAll(b => b.PlayerId == playerId);
             if (removed == 0) return;
+
+            // That may have been the group's last member. Say so now rather than leaving it to the tick loop,
+            // which is about to stop if this was the last bot on the server - and a group left frozen mid-bout
+            // makes its own replacements queue up behind each other. See SquadCoordinator.OnGroupEmptied.
+            if (groupId != 0 && _bots.All(b => b.GroupId != groupId))
+                SquadCoordinator.OnGroupEmptied(groupId);
 
             Logger.Log($"Bot {playerId} untracked. Active bots: {_bots.Count}.", LogLevel.INFO);
             if (_bots.Count == 0) StopTicking();
@@ -206,29 +311,50 @@ namespace MDS.Systems
         // A death-triggered kick is delayed so the game can credit the killer and play the death before
         // the bot is removed (an immediate kick makes the bot vanish without crediting the kill).
         // A non-null replacementSpec (+ position) spawns a replacement once the kick fires (Replace).
-        private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor = null, int groupId = 0, bool holdReplacement = false)
         {
             if (!UnityEngine.Application.isPlaying)
             {
                 // Edit-mode (tests): no coroutine host / no real game - do it synchronously, no delays.
                 KickBot(playerId);
-                SpawnReplacement(replacementSpec, ai, death, placement);
+                SpawnReplacement(replacementSpec, ai, death, placement, predecessor, groupId);
                 return;
             }
 
-            MonoBehaviourRunner.Instance.StartCoroutine(DeathKickRoutine(playerId, replacementSpec, ai, death, placement));
+            MonoBehaviourRunner.Instance.StartCoroutine(DeathKickRoutine(playerId, replacementSpec, ai, death, placement, predecessor, groupId, holdReplacement));
         }
 
-        private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor, int groupId, bool holdReplacement)
         {
+            // This runs on the DontDestroyOnLoad runner, so it keeps going across a map change. If the round
+            // turned over while we waited, the bot and its slot are already gone and the replacement would spawn
+            // into the new round carrying the old round's AI and placement, so drop the rest of the routine.
+            int generation = _generation;
+
             // 1) Wait so the killer is credited and the death plays out before the bot is removed.
             yield return new WaitForSeconds(KickDelaySeconds);
+            if (generation != _generation) yield break;
             KickBot(playerId);
 
-            // 2) Spawn the replacement only AFTER a short gap, so the kick fully frees the bot slot
+            // 2) Spawn the replacement only after a short gap, so the kick fully frees the bot slot
             //    first (kicking and respawning back-to-back can make the spawnSpecific fail).
             yield return new WaitForSeconds(ReplaceDelaySeconds);
-            SpawnReplacement(replacementSpec, ai, death, placement);
+            if (generation != _generation) yield break;
+
+            // 3) Optionally sit out the rest of the bout, so the group actually fights shorthanded instead of
+            //    being topped back up mid-fight. Capped, because a bout that never ends - a drill left running
+            //    while everyone wanders off - must not delete the bot for good.
+            if (holdReplacement)
+            {
+                float waitUntil = Time.realtimeSinceStartup + ReplacementHoldTimeout;
+                while (!GroupBetweenBouts(groupId) && Time.realtimeSinceStartup < waitUntil)
+                {
+                    yield return new WaitForSeconds(ReplacementHoldPoll);
+                    if (generation != _generation) yield break;
+                }
+            }
+
+            SpawnReplacement(replacementSpec, ai, death, placement, predecessor, groupId);
         }
 
         private static void KickBot(int playerId)
@@ -239,16 +365,23 @@ namespace MDS.Systems
             Logger.Log($"Bot {playerId} kicked; replacement (if any) in {ReplaceDelaySeconds}s.", LogLevel.DEBUG);
         }
 
-        private static void SpawnReplacement(BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement)
+        // Whether a held replacement may appear yet. The live-member check has to happen here rather than in the
+        // coordinator: its own bookkeeping is rebuilt by the tick loop, and the tick loop stops once the last bot
+        // is gone, so a group wiped out entirely would look forever mid-fight and strand its replacements until
+        // the timeout. _bots is the authoritative list and is accurate whether or not anything is ticking.
+        private static bool GroupBetweenBouts(int groupId) =>
+            _bots.All(b => b.GroupId != groupId) || SquadCoordinator.IsBoutOver(groupId);
+
+        private static void SpawnReplacement(BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor, int groupId)
         {
             if (replacementSpec != null && placement.HasValue)
-                SpawnBots(1, replacementSpec, ai, death, placement);
+                SpawnBots(1, replacementSpec, ai, death, placement, predecessor, groupId: groupId);
         }
 
-        // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills
-        // in the bot's ACTUAL name/regtag/uniformId. The game assigns those randomly when unspecified,
-        // so reusing the real values makes the replacement match the bot it replaces. Returns null for
-        // random-spawned bots (which have no spec to replay).
+        // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills in the bot's
+        // actual name/regtag/uniformId. The game assigns those randomly when unspecified, so reusing the real
+        // values makes the replacement match the bot it replaces. Returns null for random-spawned bots (which
+        // have no spec to replay).
         private static BotSpawnSpec BuildReplacementSpec(BotController controller)
         {
             var spec = controller.Spec;
@@ -281,9 +414,27 @@ namespace MDS.Systems
 
         private static IEnumerator TickLoop()
         {
+            // Like the other delayed work, this runs on the DontDestroyOnLoad runner. If a tick loop from an
+            // earlier generation is somehow still alive (a stale coroutine handle, or statics reset out from
+            // under it), it would drive the same bots alongside the current loop and the two sets of input
+            // commands fight each other, leaving bots crawling back and forth. Exit as soon as that's detected.
+            int generation = _generation;
+
             while (_bots.Count > 0)
             {
+                if (generation != _generation) yield break;
+
                 float now = Time.realtimeSinceStartup;
+
+                // Report an unanswered spawn request promptly, even when no further bots join to trigger it.
+                PrunePendingSpawns();
+
+                // One shared snapshot of all spawned players/bots per tick, so neighbour-aware steering
+                // (separation, collision avoidance) sees everyone without an O(n) gather per bot.
+                CharacterTracker.Refresh(TickInterval);
+
+                // Lay out the squads before the bots decide, so each one reads a slot built from this tick.
+                SquadCoordinator.Refresh(_bots, TickInterval);
 
                 foreach (var bot in _bots.ToList())
                 {
@@ -311,6 +462,10 @@ namespace MDS.Systems
             public BotAiEnum Ai;
             public BotDeathPolicy Death;
             public BotPlacement? Placement;
+            public IBotAi Predecessor;   // Replace only: AI of the bot being replaced, for InheritFrom
+            public float RequestedAt;    // realtime the spawn was asked for, so a request that never lands expires
+            public int? GuardTargetId;   // the player a guardian AI should escort, from the summon that placed it
+            public int GroupId;          // the spawn batch, so bots summoned together fight as one formation
         }
     }
 }
