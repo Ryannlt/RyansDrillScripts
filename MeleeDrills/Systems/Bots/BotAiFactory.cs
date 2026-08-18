@@ -24,6 +24,7 @@ namespace MDS.Systems
             Register(BotAiEnum.GroupEasy, () => new MeleeAi(BotAiEnum.GroupEasy));
             Register(BotAiEnum.GroupNormal, () => new MeleeAi(BotAiEnum.GroupNormal));
             Register(BotAiEnum.Group, () => new MeleeAi(BotAiEnum.Group));
+            Register(BotAiEnum.GroupHard, () => new MeleeAi(BotAiEnum.GroupHard));
             Register(BotAiEnum.Test, () => new MeleeAi(BotAiEnum.Test));
 
             Logger.Log($"Registered {_factories.Count} bot AI type(s).", LogLevel.INFO);

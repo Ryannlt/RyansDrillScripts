@@ -20,7 +20,8 @@ namespace MDS.Systems
         public float Standoff;       // range the formation's point holds from the enemy
         public bool Post;            // wait at the post until provoked, and return to it afterwards
         public bool Breakoff;        // once provoked, re-establish range before swinging (needs Post)
-        public float BreakoffRange;  // range re-established when breaking off
+        public float BreakoffRange;  // furthest the group gives ground when breaking off, measured from where it was provoked
+        public float EngageDelay;    // seconds after the first provocation before the group may swing
         public float ResetRange;     // how far the target may get from the post before disengaging (0 = no limit)
         public int MinMembers;       // fewest members it will fight with; below this it breaks off and stays shut
         public float ReturnDelay;    // seconds it lingers where the bout ended before walking back to the post

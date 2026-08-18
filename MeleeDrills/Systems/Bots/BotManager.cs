@@ -48,6 +48,12 @@ namespace MDS.Systems
         private const float ReplacementHoldTimeout = 120f;
         private const float ReplacementHoldPoll = 0.5f;
 
+        // Bots whose death was a casualty of their group's own bout, filled in by OnPlayerKilled. Only these
+        // hold their replacement back; see DeathKickRoutine. It has to be a side channel because OnBotDied runs
+        // first and does not know who did it - the game fires OnPlayerHurt before OnPlayerKilledPlayer, and for
+        // a death with no killer at all (an admin slay, the environment) it never fires the second one.
+        private static readonly HashSet<int> _boutCasualties = new();
+
         // Handed out one per spawn batch, so bots summoned together can be recognised as a formation later. Never
         // reused within a session, so a stale id can't quietly adopt a bot into a group it was never part of.
         private static int _nextGroupId = 1;
@@ -206,9 +212,10 @@ namespace MDS.Systems
             IBotAi predecessorAi = controller.Ai;   // Replace: lets the replacement resume its standing order
             int groupId = controller.GroupId;       // Replace: keeps the replacement in its formation
 
-            // Whether the replacement should wait out the bout instead of walking straight back into it. Without
-            // this a 3v1 is briefly a 2v1 and then a 3v1 again, so the shorthanded fight the drill is about never
-            // actually happens.
+            // Whether the replacement is *allowed* to wait out the bout instead of walking straight back into
+            // it. Without the hold, a 3v1 is briefly a 2v1 and then a 3v1 again, so the shorthanded fight the
+            // drill is about never actually happens. Whether it actually waits is decided later, once the killer
+            // is known: see _boutCasualties.
             bool holdReplacement = groupId != 0 && controller.Ai is MeleeAi melee && melee.HoldReplacement;
 
             switch (policy)
@@ -251,7 +258,30 @@ namespace MDS.Systems
             var victim = _bots.FirstOrDefault(b => b.PlayerId == victimPlayerId);
             if (victim == null) return;
 
+            // A bot killing a bot *of its own faction* is the friendly-fire case being chased. Logged before the
+            // wake below, since OnMemberKilled deliberately swallows a kill by one of the group's own.
+            //
+            // The faction test matters as soon as bots exist on both sides, which groupfight and xvx both do:
+            // without it every ordinary cross-faction bot kill lands in the log as friendly fire and the record
+            // is worthless for tuning. Unknown factions are treated as a match, keeping this on the same
+            // fail-safe side as the aim clamp.
+            var killer = _bots.FirstOrDefault(b => b.PlayerId == killerPlayerId);
+            bool sameSide = killer != null
+                && (killer.Bot.Faction == null || victim.Bot.Faction == null
+                    || killer.Bot.Faction == victim.Bot.Faction);
+
+            if (sameSide && killer.Position is Vector3 kp && victim.Position is Vector3 vp && killer.Heading is float kh)
+                MeleeProbe.LogFriendlyFire(killerPlayerId, victimPlayerId,
+                    new Vector2(kp.x, kp.z), kh, new Vector2(vp.x, vp.z));
+
             SquadCoordinator.OnMemberKilled(victim.GroupId, victimPlayerId, killerPlayerId);
+
+            // Only a death at the hands of the bout's own opponent holds a replacement back. A member cut down by
+            // another group's bot - which is what happens when a player lures a second group across the first -
+            // is not a casualty of this bout, and holding for it leaves the group short until the timeout. Asked
+            // after OnMemberKilled so the wake this kill files is already on the books.
+            if (SquadCoordinator.IsBoutOpponent(victim.GroupId, killerPlayerId))
+                _boutCasualties.Add(victimPlayerId);
         }
 
         public static void OnBotDisconnected(int playerId)
@@ -265,6 +295,7 @@ namespace MDS.Systems
             _generation++;
             _bots.Clear();
             _pending.Clear();
+            _boutCasualties.Clear();
             CharacterTracker.Reset();
             MeleeProbe.Reset();
             CombatTracker.Reset();
@@ -280,6 +311,23 @@ namespace MDS.Systems
         // arrival order, a leftover would be handed to the next bot to join, giving it the wrong placement, spec
         // and AI for the rest of the round. Requests are enqueued in time order, so expired ones are always at
         // the front.
+        // A copy of the tracked bots in random order. The copy is needed anyway, since a bot can be untracked
+        // mid-tick, so shuffling it costs one pass over a handful of entries.
+        private static List<BotController> ShuffledBots()
+        {
+            List<BotController> order = _bots.ToList();
+
+            for (int i = order.Count - 1; i > 0; i--)
+            {
+                int j = Random.Range(0, i + 1);
+                BotController swap = order[i];
+                order[i] = order[j];
+                order[j] = swap;
+            }
+
+            return order;
+        }
+
         private static void PrunePendingSpawns()
         {
             float now = Time.realtimeSinceStartup;
@@ -342,9 +390,16 @@ namespace MDS.Systems
             if (generation != _generation) yield break;
 
             // 3) Optionally sit out the rest of the bout, so the group actually fights shorthanded instead of
-            //    being topped back up mid-fight. Capped, because a bout that never ends - a drill left running
-            //    while everyone wanders off - must not delete the bot for good.
-            if (holdReplacement)
+            //    being topped back up mid-fight. Only for a bot the bout itself killed: anything else - a stray
+            //    stab from a group next door, an admin slay - is not part of the drill, and waiting on a bout it
+            //    was never in would strand the replacement until the timeout. Capped either way, because a bout
+            //    that never ends - a drill left running while everyone wanders off - must not delete the bot for
+            //    good.
+            bool boutCasualty = _boutCasualties.Remove(playerId);
+            if (holdReplacement && !boutCasualty)
+                Logger.Log($"Bot {playerId} was not killed by its group's opponent; replacing without holding.", LogLevel.DEBUG);
+
+            if (holdReplacement && boutCasualty)
             {
                 float waitUntil = Time.realtimeSinceStartup + ReplacementHoldTimeout;
                 while (!GroupBetweenBouts(groupId) && Time.realtimeSinceStartup < waitUntil)
@@ -436,7 +491,12 @@ namespace MDS.Systems
                 // Lay out the squads before the bots decide, so each one reads a slot built from this tick.
                 SquadCoordinator.Refresh(_bots, TickInterval);
 
-                foreach (var bot in _bots.ToList())
+                // Shuffled, so that bots which decide on the same tick do not resolve in a fixed order. It matters
+                // wherever two of them want the same thing at once, the stab separation gate most of all: a
+                // riposte ignores the attack cooldown and the top tiers have no reaction beats, so both members
+                // of a pair reach the gate on the same tick with nothing to separate them. In spawn order the
+                // same bot won every time and the pair always led with the same member.
+                foreach (var bot in ShuffledBots())
                 {
                     // Self-heal: a replacement that joined but never spawned (game rejected it, e.g. a
                     // carbon-bot limit) would otherwise stay tracked forever as a ghost.

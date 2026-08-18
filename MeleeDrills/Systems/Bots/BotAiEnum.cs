@@ -13,7 +13,8 @@ namespace MDS.Systems
         Guardian,      // Escorts the player it was summoned onto and fights whatever threatens them.
         GroupEasy,     // Group difficulty: slow reactions - beatable.
         GroupNormal,   // Group difficulty: human reactions.
-        Group,         // Group difficulty: best reactions + fastest pacing (hardest). Drill station: bots summoned together wait where they were set up, all wake when any one is stabbed, back off to re-form, then fight as a formation and return to the post afterwards.
+        Group,         // Group difficulty: best reactions + fastest pacing. Throws perfect updowns, which cannot be blocked. Drill station: bots summoned together wait where they were set up, all wake when any one is stabbed, back off to re-form, then fight as a formation and return to the post afterwards.
+        GroupHard,     // Group at full reactions, but opposite stabs are held at least stabSeparation apart, so an updown can always be blocked.
         Test           // Development sandbox: Dueling's levers plus whatever behaviour is being worked on.
         // Dueling*/Group*/RiposteDummy are MeleeAi presets (capability-toggle bundles); StabbingDummy is the MeleeDummy class. See MeleeAi.
     }

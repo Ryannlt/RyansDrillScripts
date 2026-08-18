@@ -46,7 +46,10 @@ namespace MDS.Systems
         // blocked (both measured near 1.5s from a human spamming attack; the engine's ~0.35s block stun does not
         // shorten it). Throwing the next strike sooner overlaps the still-playing swing. Timed from release.
         private const float MissedStabDuration = 1.5f;
-        private const float StrikeCommitWindow = 0.5f; // after releasing a strike, don't block or we cancel our own swing before it lands
+        // Extra time we refuse to block for after throwing first, so the bot backs its own stab instead of
+        // flinching into a guard. Deliberately NOT part of how long the blade is treated as live: it is about
+        // nerve, not geometry, and folding it in made the aim cap hold for over a second after every first
+        // strike.
         private const float FirstStrikeCommitBonus = 0.4f; // extra commit time when we threw first, so we back our stab instead of flinching into a guard
         private const float MinBlockHold = 0.35f;      // keep a raised guard up at least this long so it reads and animates
         private const float AimOffset = 0.3f;          // sideways aim shift while striking to centre a right-hand stab, metres
@@ -56,6 +59,33 @@ namespace MDS.Systems
         // back next to whoever just killed it. Measured by eye rather than probed, so adjust if a fresh bot still
         // swings badly. Not a lever: it describes the engine, like the timings above.
         private const float SpawnStrikeDelay = 1.0f;
+
+        // Blade geometry, and how long we treat the blade as out. Measurements of the weapon, not balance
+        // choices, which is why they sit here rather than in the lever set: answering a game patch means
+        // re-measuring them, not retuning them.
+        //
+        // BladeBearing is the game's own number, read out of the baked strike data by MeleeLogger:
+        //
+        //   MeleeStrikeHigh | pitch=0 flat=0.90 x=0.26 z=0.86 bearing=16.6
+        //   MeleeStrikeLow  | pitch=0 flat=0.95 x=0.25 z=0.91 bearing=15.6
+        //
+        // so the weapon point sits about 16 degrees to the bot's right at the pitch bots hold. This was 25 for a
+        // while, fitted to a hit distribution that the clamp's own edge-parking had polluted, and nine degrees of
+        // mis-centring is enough to make the clamp fire on one side and miss on the other. The game's figure
+        // climbs with pitch (42 degrees at pitch 2), so this is only right while bots aim level. BladeReach is
+        // the far end of that same segment.
+        private const float BladeReach = 2.05f;   // how far the blade line extends from the body, metres
+        private const float BladeBearing = 16f;   // degrees the blade sits off the facing, positive to the bot's right
+
+        // How long after our release the blade is treated as out, and so how long the mate clamp and the release
+        // gate hold. Measured in game rather than derived, because the source figures are in the game's frame of
+        // reference and this one is in ours.
+        //
+        // The source reads as 0.70 (initialProcessingDelay 0.28 + duration 0.42) and MeleeLogger's frames put the
+        // game's own IsPlayerMeleeAttacking span at about 0.68, both of which agree with each other and are both
+        // too short here. The missing ~0.2s is the lag between us commanding the release and the game starting
+        // its execution clock. Worth re-measuring if the tick rate or the AI's command path ever changes.
+        private const float StrikeCommitWindow = 0.9f;
 
         // Movement feel. Kept const for now.
         private const float RangeTolerance = 0.3f;     // slop band around the hold range where the bot just stands
@@ -107,6 +137,7 @@ namespace MDS.Systems
         {
             Waiting,     // engageOnAttack and not yet provoked: face and block, throw nothing
             BackingOff,  // provoked, re-establishing range and formation before it will swing
+            Holding,     // set and in range, but the group's engage delay has not run out yet
             Withdrawing, // breaking off from a live enemy: still blocks and counters, but gives ground and won't press
             Fighting
         }
@@ -124,7 +155,14 @@ namespace MDS.Systems
         private float _lastConsumedBlock;     // last block we reacted to as defender (dedupe)
         private float _riposteReadyAt;        // realtime before which we hold the guard (reaction beat) before countering
         private float _priorityUntil;         // while now < this: riposte immediately, don't re-block
-        private float _strikeCommittedUntil;  // while now < this: our own strike is in flight, don't block (it'd cancel it)
+        private float _strikeCommittedUntil;  // while now < this: don't block (it'd cancel our own swing). Includes the first-strike nerve bonus.
+        private float _bladeLiveUntil;        // while now < this: the blade is actually out, so the aim cap and mate clamp apply
+
+        // Diagnostics only, read by MeleeProbe when a bot kills a bot. The aim the swing wanted versus the aim it
+        // was allowed, which is what tells a clamp that never engaged from a clamp that engaged and was not enough.
+        private float _lastAimDesired;
+        private float _lastAimClamped;
+        private int _selfId = -1;
         private float _blockStartedAt;        // realtime the current guard went up (for MinBlockHold)
         private float _blockDesiredSince = -1f; // realtime we first wanted this guard (for block reaction; -1 = not)
         private float _blockReadyAt;          // realtime the guard may go up (start plus block reaction beat)
@@ -150,6 +188,8 @@ namespace MDS.Systems
         {
             if (!self.TryGetPose(out BotPose pose))
                 return BotIntent.Idle; // not spawned, issue nothing
+
+            _selfId = self.PlayerId;   // StepAttack records its strike against it and has no self of its own
 
             // Player ids are recycled, so a new bot can be handed an id that already carries block history from
             // whoever held it before. Take whatever is on record as the baseline on the first tick, so only
@@ -275,9 +315,13 @@ namespace MDS.Systems
             // What the bot is doing this tick. Deliberately its own axis, separate from where its swing is
             // (_attackPhase, committed, priority below): the two are independent, and a new stance should be a
             // new case here rather than another '&& !flag' on every clause that already exists.
+            // Holding sits on top of Breaking rather than replacing it: backing off already stops the swings, and
+            // the delay is a second layer that keeps stopping them once the group is set. Timed from the
+            // provocation, so the two run together instead of stacking - see GroupState.ProvokedAt.
             Posture posture =
                 hasSlot && slot.Phase == SquadPhase.Breaking    ? Posture.BackingOff  // re-forming, guard up, no swings
                 : hasSlot && slot.Phase == SquadPhase.Withdrawing ? Posture.Withdrawing
+                : hasSlot && now < slot.AttackAllowedAt         ? Posture.Holding     // set, but not cleared to swing yet
                 : _engageOnAttack && !_engaged                  ? Posture.Waiting     // provoked-on-attack, not yet provoked
                 : Posture.Fighting;
 
@@ -293,8 +337,12 @@ namespace MDS.Systems
             // Face the target's actual position; leading where it's going made the bot over-rotate up close. While
             // striking, nudge the aim sideways because the stab comes off the right of the body, so the thrust
             // lands on centre of mass.
+            // Blade-live, not commit: the aim offset, the mate clamp and the turn cap all care about whether the
+            // weapon is actually out, and _strikeCommittedUntil carries the first-strike nerve bonus on top.
+            bool swingLive = _attackPhase == AttackPhase.Chamber || now < _bladeLiveUntil;
+
             Vector2 aimPos = targetPos;
-            if (_attackPhase == AttackPhase.Chamber || now < _strikeCommittedUntil)
+            if (swingLive)
             {
                 Vector2 toTarget = targetPos - pose.Position;
                 if (toTarget.sqrMagnitude > 1e-4f)
@@ -304,7 +352,34 @@ namespace MDS.Systems
                     aimPos = targetPos + botLeft * AimOffset;
                 }
             }
-            BotIntent intent = new BotIntent { LookHeading = MovementSolver.HeadingTo(pose.Position, aimPos) };
+
+            // A swing follows the aim for its whole length, so tracking the target freely is what drags a stab
+            // through a squadmate who has moved into the way since it started. Only the aim is constrained, and
+            // only while a swing is live: the stab still flies, it just stops turning, which is what a player
+            // does. Outside a swing there is nothing to hit anyone with, so the bot faces freely.
+            bool mateAcrossBlade = false;
+            float aimHeading = swingLive
+                ? ClampAimAroundMates(self, pose, aimPos, out mateAcrossBlade)
+                : MovementSolver.HeadingTo(pose.Position, aimPos);
+
+            // How far the commanded heading actually moves this tick, which matters because the game does not
+            // sample the blade at our tick rate: it stitches the blade's position between its own frames with
+            // rays, so a heading that jumps far enough in one tick sweeps everything in between even though
+            // neither end of the jump was over a squadmate. Nothing else limits this - BotController hands
+            // LookHeading straight to SetInputRotation - and measured bot turns reach 129 degrees in a tick.
+            //
+            // There was a swingTurnRate lever here that capped it. It is gone, and deliberately so: a rate
+            // ceiling cannot tell turning-to-track from turning-through-a-mate, so it throttled both. Measured in
+            // play, 100 deg/s already loses a player circling at 1.5m while anything slow enough to stop the drag
+            // is far below that. The directional clamp above is the mechanism that works, because it only
+            // restricts turning *toward* a mate. The figure is still reported so a swing trace shows the sweep.
+            float turned = swingLive ? Mathf.DeltaAngle(pose.Heading, aimHeading) : 0f;
+
+            if (swingLive && MeleeProbe.IsProbing(self.PlayerId))
+                MeleeProbe.LogSwingTick(self.PlayerId, pose.Heading, _lastAimDesired, aimHeading, turned,
+                    mateAcrossBlade, _gateRadius, _clampRadius, DescribeMates(self, pose));
+
+            BotIntent intent = new BotIntent { LookHeading = aimHeading };
 
 
             // Stab priority: after our guard absorbs the enemy's stab they're recovering and can't beat our
@@ -383,6 +458,21 @@ namespace MDS.Systems
                 && now - _blockStartedAt < MinBlockHold)
                 desiredBlock = _blockToken;
 
+            // Last resort. A mate is already across the blade, so no amount of aim clamping keeps the rays off
+            // them this tick. Raising a guard cancels our own strike outright: the game checks
+            // PlayerBase.State.ContainsMeleeBlock() every frame and marks the strike markedForDeletion the moment
+            // it is true. That is the same mechanism _strikeCommittedUntil exists to avoid tripping by accident,
+            // spent deliberately here because running a squadmate through is worse than a stab that never lands.
+            // committed, not swingLive: during the chamber there is no blade out yet, so clamping the aim is
+            // enough and cancelling the windup would cost a stab for nothing.
+            // Blade-live rather than committed: there is nothing to cancel once the weapon is back in.
+            if (_abortOnMate && mateAcrossBlade && now < _bladeLiveUntil && desiredBlock == null)
+            {
+                desiredBlock = "MeleeBlockHigh";
+                if (MeleeProbe.IsProbing(self.PlayerId))
+                    Logger.Log($"MeleeSwing[{self.PlayerId}]: aborting own stab, mate across the blade.", LogLevel.INFO);
+            }
+
             Vector2 worldMove = Vector2.zero;
 
             if (desiredBlock != null)
@@ -425,7 +515,9 @@ namespace MDS.Systems
                     // Lane discipline follows the formation, not the coordination: a duellist should still hold a
                     // swing that would go through the bot beside it. The direction the line wants is only a
                     // suggestion here - StepAttack decides whether to take it, once, as the swing begins.
-                    StepAttack(ref intent, pose, targetPos, priority, press, !inSquad || slot.LaneClear,
+                    StepAttack(ref intent, pose, targetPos, priority, press,
+                        (!inSquad || slot.LaneClear) && !(_gateOnMate && MateInBladeBand(self, pose)),
+                        inSquad ? self.GroupId : 0,
                         inSquad ? (slot.StabHigh ? "High" : "Low") : null,
                         inSquad ? (slot.SharedHigh ? "High" : "Low") : null);
             }
@@ -475,7 +567,7 @@ namespace MDS.Systems
         // fires when press is enabled. assignedDir is the direction that makes an updown with the neighbour and
         // matchDir the one that deliberately avoids it; both null when there is no formation. Which is taken, if
         // either, is decided by PickStabDirection.
-        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, bool priority, bool press, bool laneClear, string assignedDir, string matchDir)
+        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, bool priority, bool press, bool laneClear, int groupId, string assignedDir, string matchDir)
         {
             float now = Time.realtimeSinceStartup;
 
@@ -489,10 +581,13 @@ namespace MDS.Systems
                     intent.Action = "ExecuteMeleeWeaponStrike";
                     _attackPhase = AttackPhase.None;
                     _attackCooldownUntil = now + MissedStabDuration + Random.Range(0f, _attackReadBeat);
+
+                    MeleeProbe.NoteStrike(_selfId, now, _lastAimDesired, _lastAimClamped, _targetId ?? -1, laneClear);
                     _priorityUntil = 0f;                              // riposte thrown, priority spent
                     // Commit to the swing, since blocking now would cancel it. If we threw first, commit longer so
                     // the bot backs its own stab as it lands instead of flinching into a guard and eating the trade.
-                    _strikeCommittedUntil = now + StrikeCommitWindow + (_threwFirst ? FirstStrikeCommitBonus : 0f);
+                    _bladeLiveUntil = now + StrikeCommitWindow;
+                    _strikeCommittedUntil = _bladeLiveUntil + (_threwFirst ? FirstStrikeCommitBonus : 0f);
                 }
                 return;
             }
@@ -524,7 +619,16 @@ namespace MDS.Systems
             // behaviour, which is why the scale needs a middle - two bots picking freely already land an updown
             // half the time, so "never updown" is something a pair has to actively agree on, not the absence of
             // agreement. Decided once, here, as the swing starts; rolling per tick would flicker it mid-windup.
-            _attackDir = PickStabDirection(assignedDir, matchDir);
+            string dir = PickStabDirection(assignedDir, matchDir);
+
+            // Last gate before the swing, so only a bot that is actually about to stab files a claim. Priority
+            // ripostes skip the press, cooldown and range checks above but still arrive here, which is the point:
+            // two bots countering the same blocked swing is the usual way a player eats an unblockable pair.
+            // Denied just means not yet, and next tick re-rolls the direction, which below coordinate 1 may come
+            // up matching and be let straight through.
+            if (!SquadCoordinator.TryClaimStab(groupId, now, _stabSeparation, dir == "High")) return;
+
+            _attackDir = dir;
             _chamberStartedAt = now;
             _executeAt = now + WindupSeconds;
             _threwFirst = false;                               // set true only if we out-time the enemy this windup
@@ -688,6 +792,195 @@ namespace MDS.Systems
 
         // Repulsion from the other tracked bots, reusing the steering layer's comfort-zone falloff. Only bots are
         // considered: crowding a human is the player's business, but bots stacking on each other is ours.
+        // The aim heading, kept from sweeping the blade through a friendly bot.
+        //
+        // The game's hit test is a set of rays, not a bubble. CastMeleeStrikeRaycasts casts from behind the body
+        // out to the weapon, then 1.14m further along the blade, and - the part that matters here - it also casts
+        // from where each blade point sat last frame to where it sits now. A blade swinging sideways therefore
+        // connects through the gap between frames, and the faster the turn the more ground those rays cover. A
+        // mate only has to be *missed*, not cleared by a wide margin, which is why a formation can hold at
+        // squadSpacing 0.9 the way real players do.
+        //
+        // So each friendly is a forbidden angular band of half-width asin(clampRadius / distance), and this limits
+        // how far we may turn toward one rather than only checking where the aim ends up: the arc between this
+        // heading and the next is exactly what the game's inter-frame rays sweep.
+        //
+        // Only the aim moves. The swing is never delayed or abandoned here, so a bot that cannot turn far enough
+        // simply misses, which is the right outcome and the same one a player accepts. mateAcross reports the one
+        // case that leaves: a mate already across the blade, where no clamp helps and only a block can save them.
+        private float ClampAimAroundMates(BotController self, BotPose pose, Vector2 aimPos, out bool mateAcross)
+        {
+            mateAcross = false;
+
+            float desired = MovementSolver.HeadingTo(pose.Position, aimPos);
+            _lastAimDesired = desired;
+
+            if (_clampRadius <= 0f) { _lastAimClamped = desired; return desired; }
+
+            // Measured from where the blade points right now, because that is where the sweep starts.
+            //
+            // The blade is not on the centreline. A bayonet thrust comes off the right of the body, which is why
+            // AimOffset already shifts the aim left to centre it on a target, so the danger band has to be
+            // centred on the blade rather than on the facing. Without this the clamp is too tight on the side the
+            // blade is away from and too loose on the side it is on, which reads in play as bailing early turning
+            // one way and still running a mate through turning the other.
+            float current = pose.Heading;
+            float blade = current + BladeBearing;
+            float sweep = Mathf.DeltaAngle(current, desired);
+            float limit = sweep;
+
+
+            FactionCountry? ours = self.Bot.Faction;
+            var bots = BotManager.Bots;
+
+            for (int i = 0; i < bots.Count; i++)
+            {
+                BotController mate = bots[i];
+                if (mate.PlayerId == self.PlayerId) continue;
+
+                // Enemies never constrain a swing. Unknown factions are treated as friendly, so a bot that has
+                // not spawned yet cannot be run through by accident.
+                FactionCountry? theirs = mate.Bot.Faction;
+                if (ours != null && theirs != null && theirs != ours) continue;
+
+                if (!(mate.Position is Vector3 p)) continue;
+
+                Vector2 toMate = new Vector2(p.x, p.z) - pose.Position;
+                float dist = toMate.magnitude;
+
+                // Only the blade's own length matters. There is deliberately no "further away than the target"
+                // skip: the strike does not stop at the first body it meets, it gathers everyone its rays touch
+                // and spends its single hit on whoever is nearest, so a mate standing behind the target is still
+                // at risk the moment the target steps aside.
+                if (dist < 1e-4f || dist > BladeReach) continue;
+
+                float halfAngle = Mathf.Asin(Mathf.Clamp01(_clampRadius / dist)) * Mathf.Rad2Deg;
+
+                // Off the blade, not off the facing. limit stays a delta on the heading either way, since the
+                // blade travels with the body and the offset between them is fixed.
+                float mateDelta = Mathf.DeltaAngle(blade, MovementSolver.HeadingOf(toMate));
+
+                // Crowded mates widen the band toward the whole forward arc, because bearing stops predicting
+                // anything at close range: the band is an angle from the chest while the blade is a segment
+                // swinging 0.9 to 2.0m out, so rotating at all drags the arc through someone standing right
+                // there. Only ahead of the blade - a mate behind cannot be reached by a thrust, and treating
+                // them as blocking would pin the bot facing backwards.
+                //
+                // Ramped in over the closing distance rather than switched on at the threshold. As a hard switch
+                // this stepped the band from about 30 degrees to 90 the instant a mate crossed the line, and a
+                // partner shuffling either side of it moved the clamp target by tens of degrees from one tick to
+                // the next, which is the coarse mid-stab turning that the smooth clamp otherwise removed.
+                if (_mateCrowdDistance > 0f && dist < _mateCrowdDistance && Mathf.Abs(mateDelta) < 90f)
+                {
+                    float crowd = Mathf.InverseLerp(_mateCrowdDistance, _mateCrowdDistance * 0.6f, dist);
+                    halfAngle = Mathf.Lerp(halfAngle, 90f, crowd);
+                }
+
+                // Already pointing through them. Steer for the nearest way out rather than giving up: this used
+                // to 'continue', which left the bot turning completely freely with a mate under its blade and
+                // nothing but the abort to fall back on. That is what made the bot look like it never
+                // anticipated anything and merely decided whether to let the stab fly.
+                //
+                // It will often not finish in time - clearing the band takes several ticks against a strike that
+                // is live for about 0.4s - which is why the release gate and the turn cap matter more than this.
+                if (Mathf.Abs(mateDelta) < halfAngle) mateAcross = true;
+
+                // One rule, whether the mate is inside the band or outside it: stay on the side of them we are
+                // already on, no closer than the band's edge.
+                //
+                // This used to be two branches - slide toward the edge when outside, jump to the far side when
+                // inside - which computed the same target but applied it differently, leaving a step at the
+                // boundary. A mate drifting across it flipped the commanded turn between 0 and tens of degrees
+                // every tick, which is the mid-stab oscillation. Written as one clamp it is continuous: the
+                // limit eases to zero as the mate approaches and goes negative as they cross, with no jump.
+                //
+                // No test on the direction of the intended turn either. Position alone decides, so turning away
+                // from a mate is never restricted and the two sides behave symmetrically.
+                float edge = halfAngle + _bladeMargin;
+
+                if (mateDelta > 0f) limit = Mathf.Min(limit, mateDelta - edge);
+                else                limit = Mathf.Max(limit, mateDelta + edge);
+            }
+
+            float heading = current + limit;
+            _lastAimClamped = heading;
+            return heading;
+        }
+
+        // Whether a squadmate currently stands in the blade's band, using the same geometry the clamp uses so the
+        // two can never disagree about what counts as dangerous.
+        //
+        // This gates the *start* of a swing. It is the only mechanism that can reliably help, because once a stab
+        // is live the bot has about 0.4s and a measured median of 3 degrees per tick to turn with, which is not
+        // enough to clear a band this wide. A bot that cannot throw safely holds its stab and keeps its guard up,
+        // which is what a player does.
+        private bool MateInBladeBand(BotController self, BotPose pose)
+        {
+            if (_gateRadius <= 0f) return false;
+
+            float blade = pose.Heading + BladeBearing;
+            FactionCountry? ours = self.Bot.Faction;
+            var bots = BotManager.Bots;
+
+            for (int i = 0; i < bots.Count; i++)
+            {
+                BotController mate = bots[i];
+                if (mate.PlayerId == self.PlayerId) continue;
+
+                FactionCountry? theirs = mate.Bot.Faction;
+                if (ours != null && theirs != null && theirs != ours) continue;
+
+                if (!(mate.Position is Vector3 p)) continue;
+
+                Vector2 toMate = new Vector2(p.x, p.z) - pose.Position;
+                float dist = toMate.magnitude;
+                if (dist < 1e-4f || dist > BladeReach) continue;
+
+                // Deliberately narrower than the clamp, and with no crowding rule. Refusing to throw is the only
+                // thing here that costs a stab, so it stays tight and lets the clamp carry the safety: a crowded
+                // mate stops the bot turning into them rather than stopping the swing outright. Widening this is
+                // the lever to reach for if bots still kill through a stab they should never have started.
+                float halfAngle = Mathf.Asin(Mathf.Clamp01(_gateRadius / dist)) * Mathf.Rad2Deg + _bladeMargin;
+
+                if (Mathf.Abs(Mathf.DeltaAngle(blade, MovementSolver.HeadingOf(toMate))) < halfAngle) return true;
+            }
+
+            return false;
+        }
+
+        // One line per tick while a swing is live, for the probe. This exists because the FriendlyFire line
+        // records the clamp only at release, so it never showed what the clamp did *during* a swing, which is the
+        // only time it does anything at all.
+        private string DescribeMates(BotController self, BotPose pose)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            FactionCountry? ours = self.Bot.Faction;
+            var bots = BotManager.Bots;
+
+            for (int i = 0; i < bots.Count; i++)
+            {
+                BotController mate = bots[i];
+                if (mate.PlayerId == self.PlayerId) continue;
+
+                FactionCountry? theirs = mate.Bot.Faction;
+                if (ours != null && theirs != null && theirs != ours) continue;
+                if (!(mate.Position is Vector3 p)) continue;
+
+                Vector2 toMate = new Vector2(p.x, p.z) - pose.Position;
+                float dist = toMate.magnitude;
+                if (dist < 1e-4f) continue;
+
+                sb.Append(" | mate=").Append(mate.PlayerId)
+                  .Append(" d=").Append(dist.ToString("0.00"))
+                  // Off the blade, matching what the clamp compares, so a held swing and its reason line up.
+                  .Append(" off=").Append(Mathf.DeltaAngle(pose.Heading + BladeBearing, MovementSolver.HeadingOf(toMate)).ToString("0.#"))
+                  .Append(" half=").Append((Mathf.Asin(Mathf.Clamp01(_clampRadius / dist)) * Mathf.Rad2Deg).ToString("0.#"))
+                  .Append(dist > BladeReach ? " outOfReach" : "");
+            }
+
+            return sb.ToString();
+        }
+
         private Vector2 Separation(BotController self, BotPose pose)
         {
             _separationNeighbours.Clear();
@@ -973,6 +1266,7 @@ namespace MDS.Systems
             Post = _post,
             Breakoff = _breakoff,
             BreakoffRange = _breakoffRange,
+            EngageDelay = _engageDelay,
             ResetRange = _resetRange,
             MinMembers = _minMembers,
             ReturnDelay = _returnDelay,

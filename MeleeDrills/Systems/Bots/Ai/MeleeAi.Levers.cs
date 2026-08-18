@@ -63,6 +63,20 @@ namespace MDS.Systems
         // usually too wide has to be read every time, and now and then punishes an assumption.
         private float _slotError;         // furthest it may stand from its place on the ring, metres
         private float _formationLag;      // longest it may work from a stale slot, seconds
+        private float _stabSeparation;    // smallest gap between opposite stabs in one formation, seconds
+
+        // Mid-swing safety. Both come from MeleeLogger's measured reach table rather than being guessed, because
+        // guessing them is what kept this broken: see ClampAimAroundMates for the geometry they describe.
+        // Two radii, not one, because the two mechanisms they feed have opposite costs. The release gate decides
+        // whether a stab is thrown at all, so widening it makes bots passive. The mid-swing clamp only decides
+        // whether the bot may keep turning, so widening it costs tracking and nothing else. Sharing one number
+        // meant every attempt to cover the kills also muted the bots.
+        private float _gateRadius;        // half-width used to refuse a stab outright, metres
+        private float _clampRadius;       // half-width used to stop turning mid-stab, metres
+        private float _bladeMargin;       // degrees of slack kept outside a mate's band rather than sitting on it
+        private float _mateCrowdDistance; // a mate closer than this is in the way at any bearing ahead, 0 = off
+        private bool _gateOnMate;         // hold fire while a mate stands in the blade's band
+        private bool _abortOnMate;        // block to cancel our own stab when the aim cannot be pulled clear
 
         // How often the formation fights as a unit rather than merely standing in one, 0 to 1. Rolled per swing
         // and per counter: it decides whether the bot takes the direction the line assigned it and reads the
@@ -82,7 +96,8 @@ namespace MDS.Systems
         // with anybody, which is what makes these useful on a plain duellist.
         private bool _post;               // wait at the post until provoked, and return to it afterwards
         private bool _breakoff;           // once provoked, re-establish range before throwing anything
-        private float _breakoffRange;     // range re-established when breaking off
+        private float _breakoffRange;     // furthest the group gives ground when breaking off, from where it was provoked
+        private float _engageDelay;       // seconds after the first provocation before the group may swing
         private float _resetRange;        // how far the target may get from the post before disengaging (0 = no limit)
         private int _minMembers;          // fewest members it will fight with; below this it breaks off and stays shut
         private bool _holdReplacement;    // a dead member's replacement waits for the bout to end before spawning
@@ -110,6 +125,39 @@ namespace MDS.Systems
                 ("squad", "false"),       // fight as a formation with the rest of the spawn batch
                 ("coordinate", "0.5"),    // neutral: each bot picks its own swing, so updowns happen only by luck
                 ("slotError", "0"), ("formationLag", "0"), // perfect placement and perfect tracking by default
+                ("stabSeparation", "0"),  // no floor: a pair may throw opposite stabs on the same tick
+                // Both radii are effective envelopes rather than literal shoulder widths: the blade is a 1.14m
+                // segment starting ~0.9m out, so a mate about a metre away is caught at a wider angle than a ray
+                // drawn from the bot's chest would suggest. Expect both to be wrong at very different spacings.
+                //
+                // gateRadius stays narrow because it is the one that costs stabs. 0.3 is 20 degrees at squad
+                // spacing, tuned in play to the point where bots still feel willing to throw.
+                //
+                // clampRadius can afford to be wide because it costs nothing but tracking - it never cancels a
+                // swing, it only stops the bot turning further into a mate. The kills that survived the earlier
+                // tuning had the mate sitting 33 to 42 degrees off the blade while the band was only 19 to 21
+                // wide, so the model called them clear and was wrong.
+                //
+                // 0.4 is about 28 degrees at 0.85m, which with bladeMargin puts the edge at 33 - the very bottom
+                // of that kill range. Tuned in play as the point where the bots still feel like they are fencing
+                // rather than flinching, so it is a deliberate trade rather than a safe margin: expect the
+                // occasional team kill at the wide end. Raise it toward 0.55 to buy those back.
+                ("gateRadius", "0.3"), ("clampRadius", "0.4"), ("bladeMargin", "5"),
+
+                // Close in, bearing stops predicting anything: the band is an angle from the chest while the
+                // blade swings 0.9 to 2.0m out, so rotating at all drags the arc through someone standing right
+                // there. Applies to the clamp only. On the gate it was the main source of bots refusing to
+                // throw, and a crowded mate is exactly the case the clamp handles well.
+                ("mateCrowdDistance", "0.8"),
+
+                // On. Ten logged friendly kills in a row all carried laneClear=True, meaning the gate never once
+                // blocked a release - because it was off, and so the mechanism meant to stop exactly those kills
+                // had never actually run. The aim clamp alone does not cover it: a bot that starts its stab with
+                // a mate already in the band has nothing left to do but follow through.
+                ("gateOnMate", "true"),
+
+                // Still off. Blocking does not cancel reliably, so it stays a last resort behind its own lever.
+                ("abortOnMate", "false"),
                 // 0.9 is the measured gap a player cannot jump between. laneHalfWidth is about a body width, so
                 // at this spacing a partner standing beside the bot does not count as blocking its line, which is
                 // the point: once the pair is set, both are meant to be able to stab.
@@ -123,6 +171,10 @@ namespace MDS.Systems
                 // resetRange 0 = no distance limit: a bout ends when it is won or lost, not when someone steps
                 // away from it. Tidying the arena afterwards is returnDelay's job, not this one's.
                 ("breakoffRange", "4"), ("resetRange", "0"),
+                // Off outside the drill stations. Delivered on the squad slot, so it needs squad or post to reach
+                // a bot at all, and a duel pair standing off for two seconds before either will throw is not what
+                // the Dueling family is for. The Group tiers set it below.
+                ("engageDelay", "0"),
                 ("minMembers", "0"),          // 0 = fight on however few are left
                 ("holdReplacement", "false"), // only a drill with a group size worth preserving holds one back
                 ("returnDelay", "30"),        // hold where the bout ended long enough to be used again straight away
@@ -160,6 +212,7 @@ namespace MDS.Systems
                 case BotAiEnum.GroupEasy:
                 case BotAiEnum.GroupNormal:
                 case BotAiEnum.Group:
+                case BotAiEnum.GroupHard:
                 case BotAiEnum.Test:
                     levers.Add(("press", "true"));  levers.Add(("riposte", "true"));  levers.Add(("move", "true")); levers.Add(("pursue", "true"));
                     levers.Add(("targetRange", "3")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "true"));
@@ -191,9 +244,16 @@ namespace MDS.Systems
                     // breakoffRange and re-form before throwing anything, because the out-of-range fight for stab
                     // priority is most of the skill and starting from the activation stab would skip it. When the
                     // player dies or walks off they return to the post and re-arm for the next one.
-                    if (aiType == BotAiEnum.GroupEasy || aiType == BotAiEnum.GroupNormal || aiType == BotAiEnum.Group)
+                    if (aiType == BotAiEnum.GroupEasy || aiType == BotAiEnum.GroupNormal
+                        || aiType == BotAiEnum.Group || aiType == BotAiEnum.GroupHard)
                     {
                         levers.Add(("breakoff", "true"));
+
+                        // Give ground once, then stand and defend for a moment before either side commits. Both
+                        // numbers are deliberately small: the point is a clean run-in that the player chooses to
+                        // close, not a stand-off. breakoffRange keeps its shared default of 4 metres, now measured
+                        // as ground given rather than range held.
+                        levers.Add(("engageDelay", "2"));
                         // Stop one short of a duel: a 3v1 plays on as a 2v1 and only resets when the next death
                         // would make it a 1v1, which is not what these were summoned for. Safe at any size because
                         // the coordinator caps it by the batch's own strength, so a bot summoned alone still duels.
@@ -213,6 +273,16 @@ namespace MDS.Systems
                         levers.Add(("coordinate",
                             aiType == BotAiEnum.GroupEasy ? "0.3" :
                             aiType == BotAiEnum.GroupNormal ? "0.5" : "1"));
+
+                        // The floor under an updown. Opposite stabs closer together than this cannot be blocked
+                        // at all, since a player guards one direction at a time, so the formation holds the
+                        // second one back until the gap is met. Group keeps 0 and stays unblockable, which is
+                        // what GroupHard exists to be an alternative to. Levers may space stabs further apart on
+                        // their own; this only ever stops them landing closer.
+                        levers.Add(("stabSeparation",
+                            aiType == BotAiEnum.GroupEasy ? "0.35" :
+                            aiType == BotAiEnum.GroupNormal ? "0.25" :
+                            aiType == BotAiEnum.GroupHard ? "0.15" : "0"));
                     }
 
                     switch (aiType)
@@ -240,7 +310,8 @@ namespace MDS.Systems
                             // split, but not so loose that the gap is simply there for the taking.
                             levers.Add(("slotError", "0.5")); levers.Add(("formationLag", "0.6")); break;
 
-                        default:                      // Dueling, Group and Test: how it is supposed to be done
+                        default:                      // Dueling, Group, GroupHard and Test: how it is supposed to
+                                                      // be done. GroupHard differs only in stabSeparation.
                             levers.Add(("blockReactionMin", "0")); levers.Add(("blockReactionMax", "0"));
                             levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0"));
                             levers.Add(("attackReadBeat", "0.3"));
@@ -275,9 +346,10 @@ namespace MDS.Systems
             "targetRange", "ignoreTeam", "ignoreBots", "stickyTarget", "engageOnAttack",
             "passiveRange", "passiveBlockReaction",
             "guard", "guardTarget", "guardRange", "guardFollowRange", "separationRange",
-            "squad", "coordinate", "slotError", "formationLag",
+            "squad", "coordinate", "slotError", "formationLag", "stabSeparation",
+            "gateRadius", "clampRadius", "bladeMargin", "mateCrowdDistance", "gateOnMate", "abortOnMate",
             "squadSpacing", "laneHalfWidth", "squadStandoff",
-            "post", "breakoff", "breakoffRange", "resetRange",
+            "post", "breakoff", "breakoffRange", "engageDelay", "resetRange",
             "minMembers", "holdReplacement", "returnDelay"
         };
 
@@ -296,8 +368,16 @@ namespace MDS.Systems
             { "passiverange", "engageonattack" },
             { "guardtarget", "guard" }, { "guardrange", "guard" }, { "guardfollowrange", "guard" },
             { "coordinate", "squad" }, { "sloterror", "squad" }, { "formationlag", "squad" },
+            { "stabseparation", "squad" },
+            // gateRadius, clampRadius and abortOnMate are deliberately ungated. They replaced swingClearance,
+            // which was squad-gated, but the aim clamp they drive runs on any bot with a live swing and a
+            // friendly bot nearby - a lone duellist beside a dummy is exactly the case, and gating them here
+            // would report "no effect" on the one setup that proves they work.
             { "squadspacing", "squad" }, { "lanehalfwidth", "squad" }, { "squadstandoff", "squad" },
             { "breakoff", "post" }, { "breakoffrange", "breakoff" }, { "resetrange", "post" },
+            // engageDelay is deliberately NOT gated on breakoff. It is a separate layer on the same wake: a
+            // station told to fight from where the blow landed can still be told to wait a beat before it does.
+            { "engagedelay", "post" },
             { "minmembers", "post" }, { "holdreplacement", "post" }, { "returndelay", "post" },
         };
 
@@ -383,12 +463,20 @@ namespace MDS.Systems
                 case "coordinate":       return SetFraction(value, v => _coordinate = v, "coordinate", ref error);
                 case "sloterror":        return SetFloat(value, 0f, v => _slotError = v, "slotError", ref error);
                 case "formationlag":     return SetFloat(value, 0f, v => _formationLag = v, "formationLag", ref error);
+                case "stabseparation":   return SetFloat(value, 0f, v => _stabSeparation = v, "stabSeparation", ref error);
+                case "gateradius":       return SetFloat(value, 0f, v => _gateRadius = v, "gateRadius", ref error);
+                case "clampradius":      return SetFloat(value, 0f, v => _clampRadius = v, "clampRadius", ref error);
+                case "blademargin":      return SetFloat(value, 0f, v => _bladeMargin = v, "bladeMargin", ref error);
+                case "matecrowddistance": return SetFloat(value, 0f, v => _mateCrowdDistance = v, "mateCrowdDistance", ref error);
+                case "gateonmate":       return SetBool(value, v => _gateOnMate = v, "gateOnMate", ref error);
+                case "abortonmate":      return SetBool(value, v => _abortOnMate = v, "abortOnMate", ref error);
                 case "squadspacing":     return SetFloat(value, 0f, v => _squadSpacing = v, "squadSpacing", ref error);
                 case "lanehalfwidth":    return SetFloat(value, 0f, v => _laneHalfWidth = v, "laneHalfWidth", ref error);
                 case "squadstandoff":    return SetFloat(value, 0f, v => _squadStandoff = v, "squadStandoff", ref error);
                 case "post":             return SetBool(value, v => _post = v, "post", ref error);
                 case "breakoff":         return SetBool(value, v => _breakoff = v, "breakoff", ref error);
                 case "breakoffrange":    return SetFloat(value, 0f, v => _breakoffRange = v, "breakoffRange", ref error);
+                case "engagedelay":      return SetFloat(value, 0f, v => _engageDelay = v, "engageDelay", ref error);
                 case "resetrange":       return SetFloat(value, 0f, v => _resetRange = v, "resetRange", ref error); // 0 = no limit
                 case "minmembers":       return SetInt(value, 0, v => _minMembers = v, "minMembers", ref error);
                 case "holdreplacement":  return SetBool(value, v => _holdReplacement = v, "holdReplacement", ref error);
@@ -449,12 +537,20 @@ namespace MDS.Systems
             yield return ("coordinate", _coordinate.ToString("0.##"));
             yield return ("slotError", _slotError.ToString("0.##"));
             yield return ("formationLag", _formationLag.ToString("0.##"));
+            yield return ("stabSeparation", _stabSeparation.ToString("0.##"));
+            yield return ("gateRadius", _gateRadius.ToString("0.##"));
+            yield return ("clampRadius", _clampRadius.ToString("0.##"));
+            yield return ("bladeMargin", _bladeMargin.ToString("0.#"));
+            yield return ("mateCrowdDistance", _mateCrowdDistance.ToString("0.##"));
+            yield return ("gateOnMate", _gateOnMate ? "true" : "false");
+            yield return ("abortOnMate", _abortOnMate ? "true" : "false");
             yield return ("squadSpacing", _squadSpacing.ToString("0.##"));
             yield return ("laneHalfWidth", _laneHalfWidth.ToString("0.##"));
             yield return ("squadStandoff", _squadStandoff.ToString("0.##"));
             yield return ("post", _post ? "true" : "false");
             yield return ("breakoff", _breakoff ? "true" : "false");
             yield return ("breakoffRange", _breakoffRange.ToString("0.##"));
+            yield return ("engageDelay", _engageDelay.ToString("0.##"));
             yield return ("resetRange", _resetRange.ToString("0.##"));
             yield return ("minMembers", _minMembers.ToString());
             yield return ("holdReplacement", _holdReplacement ? "true" : "false");
@@ -479,9 +575,14 @@ namespace MDS.Systems
             _guard = p._guard; _guardRange = p._guardRange; _guardFollowRange = p._guardFollowRange; _separationRange = p._separationRange;
             _squad = p._squad; _coordinate = p._coordinate;
             _slotError = p._slotError; _formationLag = p._formationLag;
+            _stabSeparation = p._stabSeparation;
+            _gateRadius = p._gateRadius; _clampRadius = p._clampRadius;
+            _bladeMargin = p._bladeMargin; _mateCrowdDistance = p._mateCrowdDistance;
+            _gateOnMate = p._gateOnMate; _abortOnMate = p._abortOnMate;
             _squadSpacing = p._squadSpacing; _laneHalfWidth = p._laneHalfWidth;
             _squadStandoff = p._squadStandoff;
-            _post = p._post; _breakoff = p._breakoff; _breakoffRange = p._breakoffRange; _resetRange = p._resetRange;
+            _post = p._post; _breakoff = p._breakoff; _breakoffRange = p._breakoffRange; _engageDelay = p._engageDelay;
+            _resetRange = p._resetRange;
             _minMembers = p._minMembers; _holdReplacement = p._holdReplacement; _returnDelay = p._returnDelay;
             _engageOnAttack = p._engageOnAttack;
             _guardTargetId = p._guardTargetId;   // a replacement guard keeps escorting the same player

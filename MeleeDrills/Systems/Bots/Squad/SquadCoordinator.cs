@@ -14,6 +14,7 @@ namespace MDS.Systems
         public bool StabHigh;     // the direction to swing, alternated along the line so neighbours never match
         public bool SharedHigh;   // the one direction the whole line would throw, for a pair deliberately matching
         public SquadPhase Phase;  // waiting, backing off, or fighting
+        public float AttackAllowedAt; // realtime the group's engage delay expires, so members hold fire until then
         public float Facing;      // heading the line faces, used while there is no enemy to look at
     }
 
@@ -105,16 +106,68 @@ namespace MDS.Systems
             public SquadPhase Phase;
             public int? TargetId;
             public float PhaseSince;
+
+            // Where the bout started and when. Both are stamped once, on the provocation that wakes the group,
+            // and neither moves again until the next bout.
+            //
+            // BreakoffFrom is what makes giving ground finite. Holding a range from the player instead meant
+            // walking at a group pushed it backwards for as long as you kept walking, so a bout could be chased
+            // across the map without ever starting. Measured from here, the retreat is a fixed distance the
+            // group gives up once, after which closing the distance is the player's to do.
+            //
+            // ProvokedAt is the engage delay's clock, and it runs from the provocation rather than from the end
+            // of the retreat on purpose. Chaining them would make a long breakoff and a long delay add up into a
+            // wait nobody asked for; running them together means a short retreat still leaves the group standing
+            // and defending for the remainder, and a long one is already paid for by the time it lands.
+            public Vector2 BreakoffFrom;
+            public float ProvokedAt;
             public int Strength;         // biggest the formation has been this time out, for groups gathered from batches
 
             // The direction a deliberately-matching line throws this bout. Rolled once when the bout starts, so
             // a pair refusing to updown is consistent long enough to be read and then different next time -
             // fixed forever would just mean always blocking high.
             public bool SharedStabHigh;
+
+            // When the formation last threw each direction. Two clocks rather than one, because the rule being
+            // enforced is about a pair of opposite stabs, so each direction has to be measured against the other
+            // one specifically. A single "last stab" clock cannot express it: tracking only direction changes
+            // lets a bot repeat the current direction without moving the clock, and its partner then measures
+            // its opposite stab against a stale timestamp and fires on the same tick.
+            public float LastHighAt = float.NegativeInfinity;
+            public float LastLowAt = float.NegativeInfinity;
         }
 
         // The slot for a bot, or false when it isn't part of a squad this tick.
         public static bool TryGetSlot(int playerId, out SquadSlot slot) => _slots.TryGetValue(playerId, out slot);
+
+        // Enforces a minimum gap between opposite stabs within one formation. Two members swinging opposite ways
+        // at the same moment cannot be blocked at all, since a player guards one direction at a time.
+        //
+        // Only opposite stabs are gated. Two members swinging the same way are stopped by a single block, so
+        // delaying those would cost the group its rate for nothing - and in a line of three or more it is what
+        // would throttle everyone rather than the one member actually causing the problem.
+        //
+        // Returns false to mean "not yet". The caller retries next tick, and is responsible for only asking when
+        // it is actually in a formation - a lone bot has nothing to separate from.
+        public static bool TryClaimStab(int groupId, float now, float minSeparation, bool wantHigh)
+        {
+            if (minSeparation <= 0f || groupId == 0) return true;
+
+            // Filed against the formation, not the batch, so gathered bots are held to one another.
+            if (!_groups.TryGetValue(LeadOf(groupId), out GroupState state)) return true;
+
+            // Only the opposite direction is checked. Two members swinging the same way are stopped by a single
+            // block, so delaying those would cost the group its rate for nothing, and in a line of three or more
+            // it is what would throttle everyone rather than the one member causing the problem.
+            float opposite = wantHigh ? state.LastLowAt : state.LastHighAt;
+            if (now - opposite < minSeparation) return false;
+
+            // Stamped even when it was not gated, so a same-direction stab still holds off the opposite one.
+            if (wantHigh) state.LastHighAt = now;
+            else state.LastLowAt = now;
+
+            return true;
+        }
 
         // Rebuilds every group's slots. Called once per bot tick, before the bots themselves tick, so each one
         // reads a slot computed from this tick's positions.
@@ -165,10 +218,13 @@ namespace MDS.Systems
                     {
                         anchor = state.Anchor;
                     }
+                    else if (state.Phase == SquadPhase.Breaking)
+                    {
+                        anchor = RetreatAnchor(state, targetPos, settings.BreakoffRange, deltaTime);
+                    }
                     else
                     {
-                        float standoff = state.Phase == SquadPhase.Engaged ? settings.Standoff : settings.BreakoffRange;
-                        anchor = MoveAnchor(state, targetPos, standoff, deltaTime);
+                        anchor = MoveAnchor(state, targetPos, settings.Standoff, deltaTime);
                     }
 
                     Vector2 toTarget = targetPos - anchor;
@@ -180,7 +236,7 @@ namespace MDS.Systems
                     if (Settled(state, members, targetPos, settings))
                     {
                         if (state.Phase == SquadPhase.Breaking)
-                            SetPhase(state, SquadPhase.Engaged, Time.realtimeSinceStartup);
+                            SetPhase(formation.Key, state, SquadPhase.Engaged, Time.realtimeSinceStartup);
                         else if (state.Phase == SquadPhase.Withdrawing)
                             StandDownToPost(formation.Key, state, members, settings, Time.realtimeSinceStartup);
                     }
@@ -254,6 +310,13 @@ namespace MDS.Systems
                 if (group.Value.Count == 0 || _memberOf.ContainsKey(group.Key)) continue;
                 if (!(_groups[group.Key].TargetId is int targetId)) continue;
 
+                // Only while actually fighting. This was the stated contract from the start and was never
+                // enforced: the test above is on the target, and a Withdrawing batch still holds one, so a group
+                // pulling out of a lost bout could be swept into an engaged formation. From there it is measured
+                // against the lead's anchor while its own withdraw logic is still trying to take it home, and the
+                // two orders fight each other - which is the shape of the bots-running-in-circles report.
+                if (_groups[group.Key].Phase != SquadPhase.Engaged) continue;
+
                 foreach (var other in _byGroup)
                 {
                     if (other.Key == group.Key || other.Value.Count == 0) continue;
@@ -265,6 +328,7 @@ namespace MDS.Systems
                     // finished its bout back into a fight nobody had picked with them.
                     int otherLead = LeadOf(other.Key);
                     if (!(_groups[otherLead].TargetId is int otherTarget) || otherTarget != targetId) continue;
+                    if (_groups[otherLead].Phase != SquadPhase.Engaged) continue;
 
                     // Join whatever they are already in rather than renumbering it. Picking the lower of the two
                     // would re-point this pair and leave the rest of an existing formation still following the
@@ -291,6 +355,8 @@ namespace MDS.Systems
                     // ids, not on the order they are walked in, so this cannot be decided by position in the loop.
                     if (group.Key != lead) _groups[group.Key].TargetId = null;
                     if (other.Key != lead) _groups[other.Key].TargetId = null;
+
+                    Logger.Log($"Squad: batch {group.Key} joined formation {lead} on target {targetId}.", LogLevel.INFO);
                     break;
                 }
             }
@@ -321,6 +387,9 @@ namespace MDS.Systems
             _disbanding.Clear();
             foreach (var pair in _memberOf)
                 if (pair.Value == formationKey) _disbanding.Add(pair.Key);
+
+            if (_disbanding.Count > 0)
+                Logger.Log($"Squad: formation {formationKey} disbanded, releasing {_disbanding.Count} batch(es) (sendHome={sendHome}).", LogLevel.INFO);
 
             for (int i = 0; i < _disbanding.Count; i++)
             {
@@ -397,6 +466,29 @@ namespace MDS.Systems
             || state.Phase == SquadPhase.Posted
             || state.Phase == SquadPhase.Withdrawing;
 
+        // Whether a kill on one of this group's members counts as a casualty of its own bout, rather than a
+        // stray from outside it. A bout casualty is the case holdReplacement exists for: the shorthanded fight
+        // the drill is about must not be quietly topped back up mid-bout. Anything else - another group's bot
+        // cutting a member down while a player lures it past, an admin slay - is not part of the drill, and
+        // holding a replacement for it just leaves the group short for no reason it can ever resolve.
+        //
+        // Call this AFTER OnMemberKilled, so the wake this kill files is already visible.
+        public static bool IsBoutOpponent(int groupId, int playerId)
+        {
+            if (groupId == 0 || playerId <= 0) return false;
+
+            int lead = LeadOf(groupId);
+            if (!_groups.TryGetValue(lead, out GroupState state)) return false;
+
+            // Mid-bout: only the player they are actually fighting counts.
+            if (state.TargetId is int target) return target == playerId;
+
+            // No target yet, so this is the kill that wakes them: the killer is about to become the target, which
+            // makes it the opening blow of the bout rather than something outside it. OnMemberKilled has already
+            // refused to file a wake naming one of their own, so a friendly never reaches here.
+            return _pendingWakes.TryGetValue(lead, out int waker) && waker == playerId;
+        }
+
         // A member was killed. Waking only on a blocked hit misses the case that matters most to a drill: a clean
         // opening stab that kills before the guard comes up leaves the rest of the group standing there. Called
         // from the kill callback via BotManager, which is what knows the victim's group.
@@ -438,7 +530,7 @@ namespace MDS.Systems
                 // form up on a passer-by and then be walked to combat range by their own slots, engaging someone
                 // who never touched them. Being attacked is the whole trigger.
                 bool wasIdle = state.TargetId == null;
-                state.Phase = SquadPhase.Engaged;
+                SetPhase(groupId, state, SquadPhase.Engaged, now);
                 state.TargetId = FirstProvoker(members);
 
                 // Starting a fresh fight: form up where the members actually are. Without a post the anchor is
@@ -447,7 +539,10 @@ namespace MDS.Systems
                 if (wasIdle && state.TargetId != null)
                 {
                     state.Anchor = MeanPosition(members);
+                    state.BreakoffFrom = state.Anchor;
+                    state.ProvokedAt = now;
                     state.SharedStabHigh = Random.value < 0.5f;
+                    state.LastHighAt = state.LastLowAt = float.NegativeInfinity;
                 }
                 return;
             }
@@ -481,7 +576,7 @@ namespace MDS.Systems
                 // ground in a lost 2v1 keeps countering the whole way back.
                 if (targetLive)
                 {
-                    SetPhase(state, SquadPhase.Withdrawing, now);
+                    SetPhase(groupId, state, SquadPhase.Withdrawing, now);
                 }
                 else
                 {
@@ -514,8 +609,11 @@ namespace MDS.Systems
                         // to the post there sends everyone marching back to it before they will engage, which is
                         // both silly to watch and exactly what returnDelay exists to avoid.
                         state.Anchor = MeanPosition(members);
+                        state.BreakoffFrom = state.Anchor;
+                        state.ProvokedAt = now;
                         state.SharedStabHigh = Random.value < 0.5f;
-                        SetPhase(state, settings.Breakoff ? SquadPhase.Breaking : SquadPhase.Engaged, now);
+                        state.LastHighAt = state.LastLowAt = float.NegativeInfinity;
+                        SetPhase(groupId, state, settings.Breakoff ? SquadPhase.Breaking : SquadPhase.Engaged, now);
                     }
                     break;
 
@@ -523,7 +621,7 @@ namespace MDS.Systems
                     // Give up backing off if a player body blocking a member has stalled it this long. The
                     // formation-is-set case is checked in Refresh, once this tick's slots exist to measure against.
                     if (now - state.PhaseSince > BreakoffTimeout)
-                        SetPhase(state, SquadPhase.Engaged, now);
+                        SetPhase(groupId, state, SquadPhase.Engaged, now);
                     break;
             }
 
@@ -550,7 +648,7 @@ namespace MDS.Systems
             // set up, not a direction the group has to hold everywhere it goes.
             state.RestHeading = MeanHeading(members);
 
-            SetPhase(state, SquadPhase.Posted, now);
+            SetPhase(formationKey, state, SquadPhase.Posted, now);
 
             // A formation that was never a unit does not outlive the fight that created it. Duellists who stood
             // apart while the same player swung at all of them go back to being separate bots the moment it is
@@ -563,9 +661,14 @@ namespace MDS.Systems
             if (settings.MinMembers <= 0) Disband(formationKey, sendHome: false);
         }
 
-        private static void SetPhase(GroupState state, SquadPhase phase, float now)
+        // Every phase change goes through here so the transitions are traceable. They are the only thing that
+        // separates the two candidate causes of a group circling - batches churning in and out of a formation
+        // versus an anchor feeding back on itself - and both are invisible in a positional log.
+        private static void SetPhase(int formationKey, GroupState state, SquadPhase phase, float now)
         {
             if (state.Phase == phase) return;
+
+            Logger.Log($"Squad: formation {formationKey} {state.Phase} -> {phase} target={(state.TargetId is int t ? t.ToString() : "none")}.", LogLevel.INFO);
 
             state.Phase = phase;
             state.PhaseSince = now;
@@ -582,10 +685,14 @@ namespace MDS.Systems
         // test. Checking a range there would never pass and would strand it in the withdrawal until the timeout.
         private static bool Settled(GroupState state, List<BotController> members, Vector2 targetPos, SquadSettings settings)
         {
-            if (state.Phase != SquadPhase.Withdrawing)
+            // Only the retreat has a distance to reach, and it is measured against where the bout started rather
+            // than against the player: the whole point of the capped retreat is that walking at the group does not
+            // move the line it is trying to reach. Withdrawing re-forms on the spot and Engaged never consults
+            // this, so neither has a range test.
+            if (state.Phase == SquadPhase.Breaking)
             {
-                float distance = Vector2.Distance(targetPos, state.Anchor);
-                if (Mathf.Abs(distance - settings.BreakoffRange) > AnchorTolerance) return false;
+                float given = Vector2.Distance(state.Anchor, state.BreakoffFrom);
+                if (given < settings.BreakoffRange - AnchorTolerance) return false;
             }
 
             for (int i = 0; i < members.Count; i++)
@@ -694,6 +801,29 @@ namespace MDS.Systems
         // the formation calm: an enemy circling at a steady distance stays inside the band and never moves the
         // anchor, so the members simply rotate around it, while an enemy closing in or backing off drags it along.
         // Repositioning is capped at FollowSpeed so the anchor cannot outrun the members chasing their slots.
+        // Gives ground away from the enemy, but only so far. The cap is on distance travelled from where the
+        // bout started, not on distance held from the player, which is the whole difference: an anchor that holds
+        // a range is towed backwards for as long as anyone walks at it, and a player who wanted the fight had no
+        // way to get one. This anchor moves once and then stays put, so closing is the player's move to make.
+        //
+        // Bounded by a radius rather than a straight line, so an enemy circling round the back cannot unwind the
+        // retreat and buy the group another full breakoff out of it.
+        private static Vector2 RetreatAnchor(GroupState state, Vector2 targetPos, float maxGiven, float deltaTime)
+        {
+            Vector2 anchor = state.Anchor;
+
+            float remaining = maxGiven - Vector2.Distance(anchor, state.BreakoffFrom);
+            if (remaining <= AnchorTolerance) return anchor;
+
+            Vector2 away = anchor - targetPos;
+            if (away.sqrMagnitude < 1e-4f) return anchor;   // standing on top of us: no direction to give ground in
+
+            anchor += away.normalized * Mathf.Min(FollowSpeed * deltaTime, remaining);
+
+            state.Anchor = anchor;
+            return anchor;
+        }
+
         private static Vector2 MoveAnchor(GroupState state, Vector2 targetPos, float standoff, float deltaTime)
         {
             Vector2 anchor = state.Anchor;
@@ -792,6 +922,7 @@ namespace MDS.Systems
                     SharedHigh = state.SharedStabHigh,
 
                     Phase = state.Phase,
+                    AttackAllowedAt = state.ProvokedAt + settings.EngageDelay,
                     Facing = MovementSolver.HeadingOf(forward),
                 };
             }
@@ -828,7 +959,7 @@ namespace MDS.Systems
         private static SquadSettings SettingsOf(BotController bot) =>
             bot.Ai is ISquadMember member
                 ? member.SquadSettings
-                : new SquadSettings { Spacing = 0.9f, LaneHalfWidth = 0.5f, Standoff = 1.5f, BreakoffRange = 6f, ResetRange = 15f };
+                : new SquadSettings { Spacing = 0.9f, LaneHalfWidth = 0.5f, Standoff = 1.5f, BreakoffRange = 4f, ResetRange = 15f };
 
         private static Vector2 Planar(BotController bot)
         {

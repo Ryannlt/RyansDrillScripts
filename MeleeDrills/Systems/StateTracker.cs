@@ -11,7 +11,6 @@ namespace MDS.Systems
     public class StateTracker
     {
         private static bool _initialized = false;
-        private static bool _warnedGameAccessUnavailable;
         private static bool _isServer;
         private static int _roundId;
         private static string _serverName;
@@ -91,8 +90,8 @@ namespace MDS.Systems
 
         // isAutoAdmin is deliberately ignored: the game hardcodes it. There is a single call site for the callback
         // in the whole of Assembly-CSharp and it passes isAutoAdmin: false literally, so it carries no
-        // information about whitelisted admins and never will until the game changes. Whitelisted admins reach us
-        // through GameAccess.IsAdmin instead - see IsPlayerAdmin below.
+        // information about whitelisted admins and never will until the game changes. See IsPlayerAdmin below for
+        // what that costs us.
         public static void OnPlayerConnected(int playerId, bool isAutoAdmin, string backendId)
         {
             // Assign rather than Add: player ids are recycled, and Add throws on an id already in the dictionary.
@@ -293,22 +292,15 @@ namespace MDS.Systems
             return _spectatorPlayers.Any(p => p.PlayerId == playerId);
         }
 
+        // Tracked from OnRCLogin only, which means it sees an admin who typed a password and misses one who was
+        // auto-logged in from the serverAdmins whitelist. The game's own answer lives on
+        // ServerRemoteConsoleAccessManager.IsLoggedIn and covers both, but reaching it needs a reference to
+        // Assembly-CSharp, and a UMod-compiled mod cannot hold one: UMod loads mod assemblies with
+        // Assembly.Load(byte[]) and registers no AssemblyResolve handler, so a bundled second DLL never binds.
+        // Only a mod that is entirely one prebuilt assembly can do it, which is what MeleeLogger and Name Hider
+        // are. Closing this gap means converting all of MDS the same way.
         public static bool IsPlayerAdmin(int playerId)
         {
-            // The game's own answer wins when we can get it. ServerRemoteConsoleAccessManager.IsLoggedIn covers
-            // both routes into admin - a typed password and a serverAdmins whitelist entry - where our tracked
-            // flag only ever sees the first, because a whitelisted auto-admin produces no server-side callback at
-            // all. That gap is why admin detection could not work with MDS deployed server-only.
-            if (GameAccess.TryIsAdmin(playerId, out bool authoritative)) return authoritative;
-
-            // Could not ask - off-server, mid-map-change, or an id the game has no authentication record for
-            // (every bot lands here). Fall back to what we tracked rather than denying.
-            if (!_warnedGameAccessUnavailable)
-            {
-                _warnedGameAccessUnavailable = true;
-                Logger.Log("GameAccess unavailable; falling back to tracked admin flags.", LogLevel.DEBUG);
-            }
-
             return _allPlayers.FirstOrDefault(p => p.PlayerId == playerId) is Player player && player.IsAdmin;
         }
 
