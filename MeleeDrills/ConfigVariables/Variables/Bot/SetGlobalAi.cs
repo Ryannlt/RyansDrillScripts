@@ -2,13 +2,7 @@ using System;
 
 namespace MDS.ConfigVariables
 {
-    // Config-file default for a bot-AI lever, the persistent counterpart of the live 'rc set globalAI' command.
-    // Format (comma-delimited data, matching the other MDS config variables like SpawnLine):
-    //   MDS:SetGlobalAi:<AiType>,<lever>,<value>
-    //   e.g. MDS:SetGlobalAi:StabbingDummy,stabInterval,2.5
-    // Spaces also work (StabbingDummy stabInterval 2.5) since both delimiters are accepted.
-    // Statics reset each map, so this re-applies the default every map load; per-bot 'rc bot cfg' still overrides.
-    // Like the live command, the value string is not type-checked here; the AI validates it when it reads it.
+    // Config-file default for a bot-AI lever, the persistent form of 'rc set globalAI'.
     public class SetGlobalAi : IConfigVariables
     {
         public ConfigCommandEnum CommandName => ConfigCommandEnum.SetGlobalAi;

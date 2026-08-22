@@ -88,16 +88,10 @@ namespace MDS.Systems
             BotManager.Reset();
         }
 
-        // isAutoAdmin is deliberately ignored: the game hardcodes it. There is a single call site for the callback
-        // in the whole of Assembly-CSharp and it passes isAutoAdmin: false literally, so it carries no
-        // information about whitelisted admins and never will until the game changes. See IsPlayerAdmin below for
-        // what that costs us.
+        // isAutoAdmin is ignored: the game hardcodes it false, so admin status comes from OnRCLogin instead.
         public static void OnPlayerConnected(int playerId, bool isAutoAdmin, string backendId)
         {
-            // Assign rather than Add: player ids are recycled, and Add throws on an id already in the dictionary.
-            // Throwing here is not contained by us, it propagates back into the game's authentication handler and
-            // aborts it partway, which leaves the connecting player without the faction, class, and uniform that
-            // were asked for. That is what made bots occasionally appear as a random class on the wrong side.
+            // Assign rather than Add: player ids are recycled and a stale entry would carry the old player's state.
             _connectedPlayers[playerId] = false;
             Logger.Log($"Player connected: {playerId}", LogLevel.DEBUG);
         }
@@ -131,11 +125,7 @@ namespace MDS.Systems
 
         public static void OnPlayerDisconnected(int playerId)
         {
-            // Everything keyed purely by id is dropped first, before the early return below. It has to run even
-            // for an id we no longer hold a player for: one that connected but never joined, or a bot the round
-            // cleanup already removed from _allPlayers. Those cases used to skip this entirely, so ids piled up
-            // for as long as the server stayed up, and since ids get recycled the leftovers eventually collided
-            // with a new connection or handed a replacement bot the previous holder's combat history.
+            // Everything keyed purely by id is dropped first, before the object lookups that may already be gone.
             _connectedPlayers.Remove(playerId);
             CombatTracker.Clear(playerId);
             CharacterTracker.Clear(playerId);
@@ -193,6 +183,10 @@ namespace MDS.Systems
 
             Logger.Log($"Player Spawned: {player}", LogLevel.DEBUG);
 
+            // Whoever this is, anyone fighting them was fighting the body that just stopped existing. A first
+            // spawn is a no-op here, since nothing can be targeting a player who has not been in the world yet.
+            BotManager.OnTargetRespawned(playerId);
+
             if (player.IsBot)
             {
                 BotManager.OnBotSpawned(player);
@@ -212,6 +206,21 @@ namespace MDS.Systems
                 BotManager.OnBotDied(player);
         }
 
+        // Proof of life. Health arrives as a byte, so an over-healed player can read 0 while still standing.
+        public static void OnPlayerSurvived(int playerId, byte newHp)
+        {
+            var player = GetPlayerById(playerId);
+            if (player == null || player.IsAlive) return;
+            if (_spectatorPlayers.Contains(player)) return;
+
+            player.MarkAlive();
+
+            // Loud on purpose. Reaching here means we called someone dead who was not, and the only way to know
+            // how often that happens is for it to say so.
+            Logger.Log($"Player {playerId} was flagged dead but is still alive at {newHp} hp; clearing the flag.",
+                LogLevel.WARNING);
+        }
+
         public static void OnPlayerEnterSpectatorMode(int playerId)
         {
             var player = GetPlayerById(playerId);
@@ -220,10 +229,7 @@ namespace MDS.Systems
             _attackingPlayers.Remove(player);
             _defendingPlayers.Remove(player);
 
-            // No longer a body on the field, so nothing may treat them as one. Their PlayerObject reference
-            // survives spectating and freeflight, so without this a bot stays locked onto a camera that can go
-            // anywhere - which is how a group ended up marching off the edge of the map, and refusing to break
-            // off, because a formation only accepts a new provocation once its current fight has ended.
+            // No longer a body on the field: a spectator keeps its PlayerObject, so mark it dead explicitly.
             player.MarkDead();
 
             if (!_spectatorPlayers.Contains(player))
@@ -292,13 +298,7 @@ namespace MDS.Systems
             return _spectatorPlayers.Any(p => p.PlayerId == playerId);
         }
 
-        // Tracked from OnRCLogin only, which means it sees an admin who typed a password and misses one who was
-        // auto-logged in from the serverAdmins whitelist. The game's own answer lives on
-        // ServerRemoteConsoleAccessManager.IsLoggedIn and covers both, but reaching it needs a reference to
-        // Assembly-CSharp, and a UMod-compiled mod cannot hold one: UMod loads mod assemblies with
-        // Assembly.Load(byte[]) and registers no AssemblyResolve handler, so a bundled second DLL never binds.
-        // Only a mod that is entirely one prebuilt assembly can do it, which is what MeleeLogger and Name Hider
-        // are. Closing this gap means converting all of MDS the same way.
+        // Tracked from OnRCLogin only, so it sees an admin who logged in this session and not one who did not.
         public static bool IsPlayerAdmin(int playerId)
         {
             return _allPlayers.FirstOrDefault(p => p.PlayerId == playerId) is Player player && player.IsAdmin;

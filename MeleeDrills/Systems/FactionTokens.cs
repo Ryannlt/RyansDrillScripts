@@ -54,9 +54,7 @@ namespace MDS.Systems
             return true;
         }
 
-        // The human-readable faction name for logs/messages. Named FactionCountry values print as their
-        // enum name; extension factions (no enum member) print their registered name instead of the bare
-        // integer; anything else falls back to the integer.
+        // The human-readable faction name for logs and messages.
         public static string DisplayName(FactionCountry faction)
         {
             if (System.Enum.IsDefined(typeof(FactionCountry), faction))

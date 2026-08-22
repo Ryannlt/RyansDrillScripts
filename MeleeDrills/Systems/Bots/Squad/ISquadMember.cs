@@ -1,8 +1,6 @@
 namespace MDS.Systems
 {
-    // What a group is doing right now. Held per group by SquadCoordinator and handed to each member on its slot.
-    // Breaking is skipped entirely when the Breakoff setting is off, so a station can be told to fight from where
-    // the provoking blow left it instead of resetting the distance first.
+    // What a group is doing right now. Breaking is skipped entirely when Breakoff is off.
     public enum SquadPhase
     {
         Posted,      // waiting at the post, nobody has provoked it
@@ -15,7 +13,8 @@ namespace MDS.Systems
     // 'rc bot cfg' like everything else.
     public struct SquadSettings
     {
-        public float Spacing;        // gap between neighbouring members, the diameter of a pair's circle
+        public float Spacing;        // closest the line ever stands, the floor its breathing works up from
+        public float SpacingVariance; // how much wider than Spacing the line may drift, 0 = a fixed gap
         public float LaneHalfWidth;  // how close a squadmate may be to the swing line before it counts as blocked
         public float Standoff;       // range the formation's point holds from the enemy
         public bool Post;            // wait at the post until provoked, and return to it afterwards
@@ -37,9 +36,7 @@ namespace MDS.Systems
         bool WantsSquad { get; }
         SquadSettings SquadSettings { get; }
 
-        // Who actually provoked this bot, or null while it is only watching someone. Deliberately not the current
-        // target: a waiting bot faces and blocks whoever is nearest, so targeting alone would wake a whole station
-        // at a passer-by. Only a real provocation counts.
+        // Who actually provoked this bot, never merely who it is looking at.
         int? ProvokedBy { get; }
 
         // Wake this bot onto a target as though it had been provoked itself. This is how one member being stabbed

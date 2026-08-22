@@ -14,28 +14,22 @@ namespace MDS.Systems
         public BotSpawnSpec Spec { get; }                 // null for randomly-spawned bots
         public BotDeathPolicy DeathPolicy { get; private set; }
 
-        // The spawn batch this bot belongs to, 0 for none. Bots summoned by one command share one id for life,
-        // which is how SquadCoordinator can treat them as a formation before they have anyone to fight. A Replace
-        // replacement inherits it, so a station survives its members being killed.
+        // The spawn batch this bot belongs to, 0 for none.
         public int GroupId { get; }
 
-        // The heading this bot was asked to face when it was placed, kept after the placement itself is consumed.
-        // Anything deciding which way a bot is "meant" to look must use this rather than the live transform: the
-        // engine turns toward inputRotation over time, so reading the transform in the moments after a spawn
-        // catches the turn half done, or not begun. Null for bots placed without a heading.
+        // The heading this bot was asked to face when placed, which is what its post records.
         public float? SpawnHeading { get; private set; }
         public bool Initialized { get; private set; }
         public bool IsAwaitingKick { get; private set; }   // a death-kick is scheduled; ignore further deaths
 
-        // Bots never set their own vertical aim, and forcing input rotation only pins the heading, so left alone
-        // they drift into looking at the ground. Level pitch is re-asserted on this cadence, which is slow enough
-        // next to the 20 Hz movement commands to cost nothing.
-        private const float LevelPitchDegrees = 0f;
+        // Forcing input rotation pins only the heading, so the vertical aim is re-asserted on this cadence.
+        private const float LevelPitch = 0f;
         private const float PitchRefreshSeconds = 5f;
 
         private IBotAi _ai;
         private BotPlacement? _pendingPlacement;          // position + optional facing, applied on first spawn
         private float _nextPitchRefresh;
+        private float _heldPitch = LevelPitch;   // what the refresh above re-asserts, last set by an intent
         private readonly float _trackedAt = Time.realtimeSinceStartup;
 
         public BotController(IPlayer bot, IBotAi ai, BotSpawnSpec spec, BotDeathPolicy deathPolicy, BotPlacement? placement, int groupId = 0)
@@ -73,7 +67,7 @@ namespace MDS.Systems
                 Logger.Log($"Bot {PlayerId} initialized for input control.", LogLevel.DEBUG);
             }
 
-            CarbonPlayerCommands.SetPitch(PlayerId, LevelPitchDegrees);
+            CarbonPlayerCommands.SetPitch(PlayerId, _heldPitch);
             _nextPitchRefresh = Time.realtimeSinceStartup + PitchRefreshSeconds;
 
             WarnIfSpawnedAsSomethingElse();
@@ -93,10 +87,7 @@ namespace MDS.Systems
             }
         }
 
-        // The game does not always spawn the bot we asked for: a full team or a class that has hit its cap gets
-        // silently substituted, which is how a bot ordered onto one side turns up on the other, or as a cannoneer
-        // when a guard was asked for. Nothing here can force it, so at least say so in the log rather than leaving
-        // it to be discovered in the field.
+        // The game does not always spawn the bot we asked for; warn rather than silently running the wrong one.
         private void WarnIfSpawnedAsSomethingElse()
         {
             if (Spec == null || !Bot.Faction.HasValue) return;
@@ -115,7 +106,7 @@ namespace MDS.Systems
             float now = Time.realtimeSinceStartup;
             if (now >= _nextPitchRefresh && Bot.PlayerObject != null)
             {
-                CarbonPlayerCommands.SetPitch(PlayerId, LevelPitchDegrees);
+                CarbonPlayerCommands.SetPitch(PlayerId, _heldPitch);
                 _nextPitchRefresh = now + PitchRefreshSeconds;
             }
 
@@ -140,9 +131,7 @@ namespace MDS.Systems
             return true;
         }
 
-        // A bot the game accepted (joined) but never actually spawned never becomes Initialized. After a
-        // timeout such a bot is a "ghost" - tracked by us but not present in the world - and is dropped.
-        // A note that I have no idea why this happens still...
+        // A bot the game accepted but never spawned. Dropped after a timeout so it cannot hold a slot forever.
         public bool IsUnspawnedGhost(float now, float timeoutSeconds) =>
             !Initialized && (now - _trackedAt) > timeoutSeconds;
 
@@ -153,6 +142,14 @@ namespace MDS.Systems
 
             if (intent.LookHeading.HasValue)
                 CarbonPlayerCommands.SetInputRotation(PlayerId, intent.LookHeading.Value);
+
+            // Sent only when it changes. The refresh above is what keeps it from drifting, so re-sending an
+            // unchanged pitch at 20 Hz would be pure command traffic for nothing.
+            if (intent.LookPitch.HasValue && !Mathf.Approximately(intent.LookPitch.Value, _heldPitch))
+            {
+                _heldPitch = intent.LookPitch.Value;
+                CarbonPlayerCommands.SetPitch(PlayerId, _heldPitch);
+            }
 
             if (intent.Running.HasValue)
                 CarbonPlayerCommands.SetRunning(PlayerId, intent.Running.Value);

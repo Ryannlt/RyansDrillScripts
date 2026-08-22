@@ -5,18 +5,7 @@ using MDS.Systems;
 
 namespace MDS.ConfigVariables
 {
-    // mod_variable MDS:SpawnLine:x,z,rotation[,count][,faction][,class][,ai][,death][,name[,regtag[,uniformId]]]
-    //
-    // Schedules a shoulder-to-shoulder bot line to spawn when the round begins. Specify it multiple times
-    // for multiple lines (e.g. two opposing lines for practice). Reuses the runtime spawnLine grammar via
-    // BotSpawnArgs, so the same positional rules apply:
-    //   - x,z,rotation : required. World position and facing (degrees from North).
-    //   - count        : optional. Defaults to the lineBotCount configurable.
-    //   - faction      : optional. 'attacking' (default), 'defending', or a faction name (e.g. French).
-    //                    attacking/defending are resolved against the live round at spawn time.
-    //   - class        : optional. Defaults to ArmyLineInfantry.
-    //   - ai,death     : optional. Default to botDefaultAi / botDefaultDeathPolicy.
-    //   - name/regtag/uniformId : optional identity extras, same as the command.
+    // mod_variable MDS:SpawnLine:x,z,rotation[,count][,faction][,class][,ai][,death] - a line at map load.
     public class SpawnLine : IConfigVariables
     {
         public ConfigCommandEnum CommandName => ConfigCommandEnum.SpawnLine;

@@ -4,12 +4,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot summonAt <playerId> [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // Spawns a single bot at another player's position, facing the way they face. This is the route that works
-    // from free roam, where the server never learns the caller's own position, which is the usual reason to reach
-    // for it. Faction and class default to the TARGET player's rather than the caller's, so summoning a sparring
-    // partner onto someone needs nothing but their id. Everything after the id follows the same positional
-    // grammar as 'rc bot summon'. All replies, including failures, go to the caller, not the target.
+    // rc bot summonAt <playerId> [faction class] [ai] [death] - summons onto another player.
     public class SummonAtSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.SummonAt;

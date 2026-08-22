@@ -4,12 +4,7 @@ using MDS.Systems;
 
 namespace MDS.Events
 {
-    // Command-facing trigger for a bot line. Validates the param shape then delegates the actual
-    // geometry/spawn to LineManager.SpawnLine (shared with the map-load auto-populate path).
-    // Parameters: (Vector2 center, float rotation, int count, float spacing, BotSpawnSpec spec, BotAiEnum ai,
-    //              BotDeathPolicy death, [int? guardTargetId])
-    // The optional eighth parameter names a player for a guardian AI to escort, set when the line was summoned
-    // onto someone.
+    // Command-facing trigger for a bot line. Validates the placement before handing it to LineManager.
     public class SpawnLineEvent : IEvent
     {
         public EventEnum EventName => EventEnum.SpawnLine;

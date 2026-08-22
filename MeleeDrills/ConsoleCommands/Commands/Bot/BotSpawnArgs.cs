@@ -6,19 +6,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // Parses the shared positional spawn grammar used by 'spawn' and 'summon':
-    //   [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // - faction/class: provide both or neither; omitted means default to the caller's faction/class.
-    //   faction accepts attacking/defending (resolved to the round's factions) or a FactionCountry name.
-    // - ai/death: omitted means config defaults (botDefaultAi / botDefaultDeathPolicy); provide inline to override.
-    // - name/regtag/uniformId: require an explicit faction+class.
-    // Strict positional order:
-    //   [count] [faction [class]] [ai] [death] [name [regtag [uniformId]]]
-    // - Neither faction nor class: both default to the caller's.
-    // - Faction only (no class): faction explicit, class defaults to the caller's.
-    // - Both faction and class: both explicit.
-    // The ai and death slots, if present, MUST parse as a valid AI / death policy - a wrong token
-    // errors rather than being silently taken as a name.
+    // Parses the shared positional spawn grammar used by spawn, summon and the line commands.
     public class BotSpawnArgs
     {
         public int Count { get; private set; } = 1;
@@ -31,14 +19,7 @@ namespace MDS.ConsoleCommands
         public static bool ValidateShape(string[] args, bool allowCount, out string error) =>
             ParseTokens(args, allowCount, out _, out error);
 
-        // Map-load line resolution (no caller). count/faction/class are all optional, with LINE defaults:
-        //   count   => lineBotCount configurable
-        //   faction => "attacking" (kept as a TOKEN and resolved later against the live round)
-        //   class   => ArmyLineInfantry
-        // The faction stays a token ("attacking" | "defending" | a FactionCountry name) because attacking
-        // and defending swap per round, so it can only be resolved at spawn time - the LineSpec carries
-        // the token for the caller (LineManager) to resolve. ai/death default to config; name/regtag/
-        // uniformId are optional extras. Reuses the same positional tail parser as the runtime grammar.
+        // Map-load line resolution with no caller: count, faction, class, ai and death all optional.
         public static bool TryResolveLine(string[] args, out LineSpec spec, out string error)
         {
             spec = default;
@@ -160,9 +141,7 @@ namespace MDS.ConsoleCommands
                 i++;
             }
 
-            // optional faction (and optional class). Accepts attacking/defending (resolved now against
-            // the live round, since these are runtime commands), a FactionCountry name, or an extension
-            // faction name (e.g. ARBritish).
+            // Optional faction, and an optional class after it. Accepts attacking/defending as well as names.
             if (i < args.Length && FactionTokens.TryResolve(args[i], out FactionCountry faction))
             {
                 p.Faction = faction;
@@ -191,9 +170,7 @@ namespace MDS.ConsoleCommands
             return true;
         }
 
-        // Parses the shared positional tail starting at args[i]: [ai] [death] [name [regtag [uniformId]]].
-        // The ai/death slots, if present, MUST parse (a wrong token errors rather than being taken as a
-        // name). 'allowName' gates whether trailing name/regtag/uniformId tokens are permitted.
+        // Parses the shared positional tail from args[i]: ai, death, name, regtag, uniform.
         private static bool ParseTail(string[] args, ref int i, bool allowName, string order,
             out BotAiEnum? ai, out BotDeathPolicy? death, out string name, out string regTag, out int? uniformId, out string error)
         {
@@ -259,12 +236,7 @@ namespace MDS.ConsoleCommands
             return true;
         }
 
-        // Bot names/regtags are single positional args, so a literal space would be split by BOTH our parser
-        // and the game's spawnSpecific command. To allow spaces, type SpacePlaceholder ('_') where you want
-        // one; it is swapped for U+2002 EN SPACE - a Unicode space that renders normally in-game but is NOT
-        // the ASCII space (U+0020) either parser splits on. Any stray ASCII space (only the comma-delimited
-        // SpawnLine config var could smuggle one into a name) is converted too. U+2002 is the char Commander
-        // Battles used and is confirmed to display; change SpaceChar for a different width.
+        // Names and regtags are single positional args, so an underscore stands in for a space.
         private const char SpacePlaceholder = '_';
         private const char SpaceChar = '\u2002';   // EN SPACE (U+2002)
 

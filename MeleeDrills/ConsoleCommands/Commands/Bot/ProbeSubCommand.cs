@@ -5,9 +5,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot probe <playerId|me|all|attacking|defending|faction> [on|off]
-    // Dev tool: logs the target's melee packet actions and hurt events to the server log so we can read the
-    // PlayerActions vocabulary and timings. No gameplay effect. See MeleeProbe.
+    // rc bot probe <target> [on|off] - per-tick melee traces for the named bots.
     public class ProbeSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Probe;

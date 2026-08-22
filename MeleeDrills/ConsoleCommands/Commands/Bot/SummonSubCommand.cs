@@ -4,10 +4,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot summon [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // Spawns a single bot (no count, since multiple would stack on one spot) then teleports it to the caller.
-    // Faction and class default to the caller's. To place the bot at another player instead, which is the route
-    // that works from free roam, use 'rc bot summonAt <playerId>'.
+    // rc bot summon [faction class] [ai] [death] [name [regtag [uniform]]] - summons onto the caller.
     public class SummonSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Summon;

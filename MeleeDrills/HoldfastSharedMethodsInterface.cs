@@ -108,7 +108,7 @@ namespace MDS
 
             if (isServer)
             {
-                MeleeProbe.OnPacket(playerId, actionCollection, ownerRotationY, ownerYaw);
+                MeleeProbe.OnPacket(playerId, actionCollection, ownerRotationY, ownerPitch, ownerYaw);
                 CombatTracker.OnPacket(playerId, actionCollection);
             }
         }
@@ -142,6 +142,8 @@ namespace MDS
             MeleeProbe.OnHurt(playerId, oldHp, newHp);
             if (newHp == 0)
                 StateTracker.OnPlayerDied(playerId);
+            else
+                StateTracker.OnPlayerSurvived(playerId, newHp);
         }
 
         public void OnSyncValueState(int value) { }

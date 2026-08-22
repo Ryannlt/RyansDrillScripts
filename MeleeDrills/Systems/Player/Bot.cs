@@ -36,6 +36,7 @@ namespace MDS.Systems
         }
 
         public void MarkDead() => IsAlive = false;
+        public void MarkAlive() => IsAlive = true;
 
         public override string ToString()
         {

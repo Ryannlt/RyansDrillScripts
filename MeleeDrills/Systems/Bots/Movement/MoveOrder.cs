@@ -4,9 +4,7 @@ namespace MDS.Systems
 {
     public enum MoveOrderKind { Stop, Seek, Arrive, Flee, Pursue, Evade, Face, FacePoint, Wander }
 
-    // A destination for a point-based movement order: either a fixed world point, or a player resolved to its
-    // live position each tick, so a bot can chase, flee, or track a moving player. Resolving a player to a point
-    // is a decision-layer concern; the pure MovementBehaviors only ever see the Vector2.
+    // A destination for a point-based movement order: either a fixed point or a tracked player.
     public struct MoveTarget
     {
         public bool IsPlayer;
@@ -17,9 +15,7 @@ namespace MDS.Systems
         public static MoveTarget Player(int playerId) => new MoveTarget { IsPlayer = true, PlayerId = playerId };
     }
 
-    // A single movement instruction for the Manual test AI. Carries whichever payload its Kind needs
-    // (Target for Seek/Arrive/Flee/Pursue/Evade/FacePoint, Heading for Face). Built by 'rc bot move' and
-    // ticked by ManualAi into a BotIntent via MovementBehaviors.
+    // A single movement instruction for the Manual test AI.
     public struct MoveOrder
     {
         public MoveOrderKind Kind;

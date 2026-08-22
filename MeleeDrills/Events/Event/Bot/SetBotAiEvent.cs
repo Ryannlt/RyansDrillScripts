@@ -3,8 +3,6 @@ using MDS.Systems;
 namespace MDS.Events
 {
     // Sets the AI of all tracked bots matching a target token.
-    // Target: <playerId> | all | attacking | defending | <faction name>
-    // Parameters: (string target, BotAiEnum ai)
     public class SetBotAiEvent : IEvent
     {
         public EventEnum EventName => EventEnum.SetBotAi;

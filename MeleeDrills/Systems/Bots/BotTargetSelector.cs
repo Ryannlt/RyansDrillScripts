@@ -3,11 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HoldfastSharedMethods;
 
-// Resolves a bot-target token to the matching tracked bot playerIds. Shared by the bot sub-commands
-// (and reusable by drills). Tokens:
-//   <playerId> | all | attacking | defending | <FactionCountry name> | <extension faction name>
-// 'attacking'/'defending' map to the round's factions via StateTracker; extension factions (e.g.
-// ARBritish) resolve via FactionTokens. Faction matching uses each bot's CURRENT faction (Bot.Faction).
+// Resolves a bot-target token (all, attacking, defending, faction, playerId) to tracked bots.
 
 namespace MDS.Systems
 {

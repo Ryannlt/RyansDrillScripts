@@ -3,13 +3,7 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // A once-per-tick snapshot of every spawned character, human players as well as bots, with planar position and
-    // a smoothed velocity. Built once per bot tick and shared by all bots, so neighbour-aware steering (Separation,
-    // Collision Avoidance) sees players too and we don't repeat an O(n) gather per bot.
-    //
-    // Velocities come from transform deltas. Player positions update at packet rate, slower than the tick, so
-    // smoothing matters; and because we teleport bots on summon or line spawn, an implausibly large step is
-    // treated as a teleport or respawn and reported as zero velocity rather than a huge spike.
+    // A once-per-tick snapshot of every spawned character, so steering does not re-walk the player list.
     public static class CharacterTracker
     {
         public readonly struct Character

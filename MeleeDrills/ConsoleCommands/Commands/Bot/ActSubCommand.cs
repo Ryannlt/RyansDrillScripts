@@ -3,11 +3,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot act <playerId> <actionToken> [argument]
-    // Dev tool: fires a single carbonPlayers playerAction at a player or bot, to confirm the exact input tokens
-    // for melee before the AI depends on them: does 'MeleeBlockHigh' make a bot block high, does 'MeleeStrikeHigh'
-    // then 'ExecuteMeleeWeaponStrike' throw a strike. The probe showed the output flags; this confirms the tokens
-    // we send. No AI required; it works on any spawned player id.
+    // rc bot act <playerId> <actionToken> [argument] - fires one raw player action, for probing.
     public class ActSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Act;

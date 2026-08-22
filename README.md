@@ -409,13 +409,12 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 **Usage:** `rc bot cfg <target> [<lever> <value>]`
 
-* Sets or lists per-bot AI levers, a granular override for one bot or group on top of the global default. It only affects bots whose AI is configurable (`StabbingDummy`, `RiposteDummy`, and the `Dueling` and `Group` tiers); others are skipped with a message.
+* Sets or lists per-bot AI levers, overriding the global default for one bot or group.
 * **Target:** `all`, `attacking`, `defending`, `<faction>`, or `<playerId>`
-* With `<lever> <value>`: set that lever on the matching bots.
-* Without a lever: list the matching bots' current levers and values. Levers that depend on a switched-off lever are listed separately after `| inactive:`, each tagged with what it is waiting on, e.g. `breakoffRange=6(needs breakoff)`. That tail is how you tell at a glance which levers a given preset is actually using: a `RiposteDummy` shows most of the list dormant, a `Group` bot only the guard levers.
-* Each tag names the **nearest** thing to switch on, not the root of the chain, so it is always something you can act on now. `breakoffRange` says `needs breakoff` while breakoff is off, then `needs post` once you turn breakoff on.
-* **Setting a dormant lever is allowed and still reports what happened.** Order of commands shouldn't matter, so the value is stored either way, but the reply says so: *"Set 'breakoffRange' = '8' on 1 bot(s). Note: it does nothing while 'breakoff' is false."* Turn the dependency on and it takes effect with the value already in place.
-* A lever's default comes from `globalAI`: see **[Bot AI Types](#bot-ai-types)**.
+* With `<lever> <value>`: set it on the matching bots. Without: list their current levers.
+* Levers held dormant by a switched-off lever are listed after `| inactive:`, tagged with what they wait on,
+  e.g. `breakoffRange=6(needs breakoff)`. Setting a dormant lever is allowed and takes effect when its gate opens.
+* Only affects bots whose AI is configurable (`StabbingDummy`, `RiposteDummy`, `Dueling*`, `Group*`).
 * **Examples:**
 
   ```
@@ -423,6 +422,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
   rc bot cfg all stabDirection High
   rc bot cfg 42
   ```
+
 
 ### `probe` & `act` *(dev tools)*
 
@@ -441,13 +441,13 @@ Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot 
 | AI | Behaviour |
 | --- | --- |
 | `None` | Does nothing. Stands where it spawned. |
-| `Manual` | Manually driven with `rc bot move` (a movement test harness: seek, arrive, flee, pursue, evade, wander, face…). Issues no orders on its own. |
-| `StabbingDummy` | Static training dummy. Stands facing its spawn direction and stabs on a fixed cadence for a player to practice blocking and attacking against. Aim it by facing the way you want when you summon it. Configurable (see below). |
-| `RiposteDummy` | Stands its ground, blocks, and only counters once provoked, never throwing first. Walk up and attack it, and it blocks and ripostes. |
-| `Guardian` | Escorts the player it was summoned onto, holding station beside them and staying out of trouble until an enemy comes within `guardRange` of them or they get into melee themselves, then it fights like a duellist. |
+| `Manual` | Manually driven with `rc bot move`, a movement test harness. Issues no orders on its own. |
+| `StabbingDummy` | Static training dummy. Stabs on a fixed cadence for block practice. Aim it by facing the way you want when you summon it. |
+| `RiposteDummy` | Stands its ground, blocks, and only counters once provoked. Never throws first. |
+| `Guardian` | Escorts whoever summoned it. Holds station beside them and fights only what comes within `guardRange`. |
 | `Test` | Current development testing settings. |
-| `DuelingEasy` / `DuelingNormal` / `Dueling` | A duelling practice bot. Stays passive, reading and blocking the closest player in range, until a player attacks it and it blocks the hit. It then locks onto that attacker and fights to the death, returning to passive when the target dies. The tiers differ only in reaction speed: `DuelingEasy` is sluggish and beatable, `DuelingNormal` is human, plain `Dueling` has instant blocks and ripostes. Duel bots **fight as individuals**, so no shared reads or timed stabs, but several attacked by the same player take up a formation so they stop crowding and cutting each other down.|
-| `GroupEasy` / `GroupNormal` / `Group` / `GroupHard` | Drill station for practising 1vXs, on the same three difficulty tiers as the `Dueling` family plus one. See **[Group drill stations](#group-drill-stations)** below: stand a batch up somewhere, and it waits until a player attacks one of them, backs off to re-form, fights as a coordinated formation, and returns to its post afterwards ready for the next player. `GroupHard` is plain `Group` with `stabSeparation 0.15`: it still throws deliberately opposite stabs, but spaces them far enough apart to be blocked one at a time, so it is the top tier that can actually be beaten rather than only survived. |
+| `DuelingEasy` / `DuelingNormal` / `Dueling` | Duelling practice. Passive until a player's attack is blocked, then locks onto that attacker and fights to the death. The tiers differ only in reaction speed. Several attacked by one player form up so they stop crowding each other. |
+| `GroupEasy` / `GroupNormal` / `Group` / `GroupHard` | Drill station for 1vXs. Provoking any one wakes all of them; they give ground, re-form, fight as a line, and return to post. See **[Group drill stations](#group-drill-stations)**. `GroupHard` is `Group` with spaced updowns, so they can be blocked one at a time. |
 
 `RiposteDummy` and the `Dueling` and `Group` tiers are presets of one configurable melee AI: the same behaviour with different capability toggles (`press`, `riposte`, `move`, `pursue`, `engageOnAttack`, `squad`, `post`) and tuning. `StabbingDummy` is a separate static-stabber AI. You can tweak any of them per bot with `rc bot cfg`.
 
@@ -459,26 +459,30 @@ A `Group` bot is for practising 2v1s and 3v1s on your own. Summon a batch and le
 rc summonLine 2 Defending ArmyLineInfantry Group Replace
 ```
 
-**Batch vs formation.** Bots from one `summonLine`, `spawnLine`, or `rc bot summon <count>` are a batch: they share a post, wake together, and a `Replace` bot rejoins the one it came from. A formation is the group a bot fights alongside. Any engaged batches on the **same player** merge into one line with shared guard, alternating stabs and lane discipline, then split back to their own posts afterwards. That means you can build a group by walking separately summoned bots onto the same player. Three converged bots play exactly like a summoned three: one lifecycle, provoking any wakes all, and `minMembers` / `holdReplacement` count the assembled size. They hold together through the bout and `returnDelay`, then each returns to its own post.
+**Batch vs formation.** Bots from one `summonLine`, `spawnLine` or `rc bot summon <count>` are a **batch**: shared
+post, they wake together, and a `Replace` bot rejoins it. Any engaged batches on the **same player** merge into
+one **formation**, then split back to their own posts. So walking separately summoned bots onto one player builds
+a group that plays exactly like a summoned one.
 
 **The cycle:**
 
-1. **Waiting.** Hold post facing the way they were set up, blocking but never attacking. Bystanders can walk past.
-2. **Provoked.** Attack any one and the whole group wakes onto whoever did it. A killing blow counts too, so a stab clean enough to drop a bot before its guard comes up still raises the alarm. A bot that kills its own groupmate never triggers this.
-3. **Backing off.** Give up to `breakoffRange` metres of ground and re-form before throwing anything, so the bout starts from a clean approach. It is a **fixed distance given once**, measured from where the group was standing when you provoked it, not a range held from you — so walking at them closes the gap normally instead of pushing them back indefinitely. Gives up after five seconds if you body-block a bot out of its slot. Turn off `breakoff` to skip this.
-4. **Standing.** For `engageDelay` seconds from the moment they were provoked they block but will not swing or counter, even once they are set. The clock runs from the provocation, not from the end of the retreat, so the two overlap: a short retreat leaves them standing for the remainder, a long one has already used the delay up. Set it `0` to remove the pause.
-5. **Fighting.** The formation holds a point and rotates around it so you face the gap between them, shares guard, and throws opposite stabs.
-6. **Re-arming.** Die or leave `resetRange` and they return to post and go quiet. Death counts immediately, not when the body clears.
+| Phase | What happens |
+| --- | --- |
+| Waiting | Hold post, block, never attack. Bystanders can walk past. |
+| Provoked | Attack any one and the whole group wakes onto whoever did it. A killing blow counts too. |
+| Backing off | Give up to `breakoffRange` metres of ground and re-form. Skipped when `breakoff` is off. |
+| Standing | For `engageDelay` seconds from the provocation they block but will not swing or counter. |
+| Fighting | The line holds a point and rotates around it, shares guard, and throws opposite stabs. |
+| Re-arming | Die or leave `resetRange` and they return to post and go quiet. |
 
-By default a killed member is replaced mid-bout, which makes an endurance grind. `minMembers` with `holdReplacement` gives the other reading: the drill runs shorthanded until it's no longer the drill, then resets. For a 3v1 use `minMembers 2` and `holdReplacement true`.
+`minMembers` with `holdReplacement` makes the group run shorthanded until it is no longer the drill, then reset.
+Without them a killed member is replaced mid-bout, which makes an endurance grind instead.
 
-**Withdrawing isn't switching off.** A group that disengages while you're alive, either from losing a member or from you leaving `resetRange`, re-forms on the spot facing you and blocks reliably, but won't swing or take a new target. It goes quiet once re-formed, you die or leave, or ten seconds pass.
+A group that disengages while you are alive still blocks and counters the whole way home, and only goes quiet
+once re-formed, you die or leave, or ten seconds pass. Waiting, backing off, standing and withdrawing all use
+`passiveBlockReaction` rather than the tier's reaction beat.
 
-A group re-forms where the bout ended whether it won or lost, keeping whatever bearing it came to rest facing, and only then does `returnDelay` decide whether it walks back. It realigns to the original setup only if it actually returns to the post.
-
-Waiting, backing off, standing and withdrawing all use `passiveBlockReaction` (instant by default) rather than the tier's reaction beat. Bots also won't swing for a moment after spawning.
-
-**Stations without a group.** `post` is independent of `squad`, so a single bot of any melee preset can hold one. Both `post` and `breakoff` are off outside the `Group` tiers:
+**Stations without a group.** `post` is independent of `squad`, so a single bot of any melee preset can hold one:
 
 ```
 rc bot summon Defending ArmyLineInfantry Dueling Replace
@@ -486,7 +490,7 @@ rc bot cfg <id> post true
 rc bot cfg <id> breakoff true
 ```
 
-That's a 1v1 sparring partner that waits on its mark, resets distance when attacked, and walks back afterwards either way. `post` alone just returns it to the mark between bouts. A lone bot never forms up, so it keeps its own spacing in the fight. Only the waiting, back-off and walk home come from the station.
+That is a 1v1 sparring partner that waits on its mark, resets distance when attacked, and walks back afterwards.
 
 ### Configurable AI levers
 
@@ -502,7 +506,7 @@ Changing a global default affects **newly created** bots of that AI, not ones al
 | Lever | Values | Default | Meaning |
 | --- | --- | --- | --- |
 | `stabInterval` | float > 0 (seconds) | `1.7` | Delay between stabs. |
-| `stabDirection` | `Random` / `High` / `Low` / `Alternate` | `Random` | Which way each stab is thrown (e.g. `High` to drill high blocks). |
+| `stabDirection` | `Random` / `High` / `Low` / `Alternate` | `Random` | Which way each stab is thrown. |
 
 *Example: a slow, high-only dummy.*
 
@@ -524,24 +528,48 @@ rc bot cfg <id> stabDirection High
 | `press` | `false` | `true` | Throw the first blow when the enemy isn't threatening. |
 | `riposte` | `true` | `true` | Counter after the guard absorbs a hit. |
 | `move` | `false` | `true` | Hold/adjust melee spacing vs. stand its ground. |
-| `pursue` | `false` | `true` | Advance toward a target that's too far, versus only holding or backing off. `false` lets a player back away and disengage instead of being followed. |
+| `pursue` | `false` | `true` | Advance toward a target that is too far. `false` lets a player back away and disengage. |
 | `stickyTarget` | `false` | `false` | Keep one target while valid, versus re-picking the closest each tick. |
-| `targetRange` | `3` | `3` | Only engage players within this many metres (`0` = unlimited). Drops the target past it. For the `Dueling` tiers this is the passive read and provoke range. |
-| `engageOnAttack` | `false` | `true` | Start passive (block only, with `press`, `riposte`, and `pursue` suppressed) and engage only a player whose attack it blocks, a hit aimed at it rather than anyone swinging nearby, fighting that target until it dies, then returning to passive. |
+| `targetRange` | `3` | `3` | Only engage players within this many metres, `0` = unlimited. For the `Dueling` tiers this is also the passive read range. |
+| `engageOnAttack` | `false` | `true` | Start passive and engage only a player whose attack it blocks, fighting that target until it dies. |
 
 **Difficulty** comes in two halves: reaction beats (how fast a bot answers you) and formation levers `coordinate`, `slotError` and `formationLag` (how well it holds its place beside another bot). The second half matters more in a group. Reactions alone give you a slow pair that still stands in a perfect line and throws perfectly opposite stabs.
 
 Every formation lever is **the worst a bot may be, not how bad it is**. Each roll runs from zero up to the lever, so a bot can come out correct by chance and a lower tier does so less often. A pair that is *usually* too wide has to be read every bout instead of solved once. `squadSpacing` stays at `0.9` for every tier. Only the stray from it changes.
 
-**Reaction beats**: the levers that separate the tiers (`seconds ≥ 0`). The `Group` tiers use the same three columns as their `Dueling` counterparts:
+**Reaction beats**: the levers that separate the tiers (`seconds ≥ 0`).
 
-| Lever | `Guardian` | `RiposteDummy` | `DuelingEasy` / `GroupEasy` | `DuelingNormal` / `GroupNormal` | `Dueling` / `Group` | Meaning |
+The `Group` tiers used to share these columns with their `Dueling` counterparts. **They no longer do** — the
+Group ladder was retuned in play and moved down a step, so `GroupEasy` is what `GroupNormal` used to be. The two
+families are listed separately below because a value meant for one was otherwise landing silently on the other.
+
+*Dueling family, plus the two standalone presets:*
+
+| Lever | `Guardian` | `RiposteDummy` | `DuelingEasy` | `DuelingNormal` | `Dueling` | Meaning |
 | --- | --- | --- | --- | --- | --- | --- |
-| `blockReactionMin` | `0.5` | `0.1` | `0.3` | `0.1` | `0` | Min delay between reading an attack and raising the guard, where `0` is instant. This is the main difficulty knob. |
-| `blockReactionMax` | `0.8` | `0.2` | `0.5` | `0.2` | `0` | Max of that delay. Each block picks a random value in the min to max range. |
+| `blockReactionMin` | `0.5` | `0.1` | `0.3` | `0.1` | `0` | Min delay between reading an attack and raising the guard. The main difficulty knob. |
+| `blockReactionMax` | `0.8` | `0.2` | `0.5` | `0.2` | `0` | Max of that delay; each block rolls between min and max. |
 | `riposteReactionMin` | `0.4` | `0` | `0.2` | `0` | `0` | Min delay between a block landing and the counter. |
 | `riposteReactionMax` | `1.1` | `0.5` | `0.8` | `0.5` | `0` | Max of that delay. |
-| `attackReadBeat` | `1.2` | `0.6` | `0.9` | `0.6` | `0.3` | Extra randomised beat added to the attack cooldown. Lower values press faster. |
+| `attackReadBeat` | `1.2` | `0.6` | `0.9` | `0.6` | `0.3` | Extra randomised beat on the attack cooldown. Lower presses faster. |
+
+*Group family. Every tier now answers at full speed — difficulty lives in the formation levers below, not in the
+reaction beats:*
+
+| Lever | `GroupEasy` | `GroupNormal` | `Group` / `GroupHard` |
+| --- | --- | --- | --- |
+| `blockReactionMin` / `Max` | `0.1` / `0.2` | `0.1` / `0.2` | `0` / `0` |
+| `riposteReactionMin` / `Max` | `0` / `0.5` | `0` / `0.5` | `0` / `0.1` Hard, `0` / `0` Group |
+| `attackReadBeat` | `0.1` | `0.3` | `0.3` |
+| `slotError` | `0.5` | `0.5` | `0.1` Hard, `0` Group |
+| `formationLag` | `0.2` | `0` | `0` |
+| `coordinate` | `0.97` | `0.98` | `1` |
+| `stabSeparation` | `0.3` | `0.25` | `0.15` Hard, `0` Group |
+| `squadSpacingVariance` | `0.5` | `0.3` | `0.1` Hard, `0` Group |
+
+`GroupEasy` and `GroupNormal` are deliberately close. Easy gives you exactly two things to work with: the line is
+late noticing its slot has moved (`formationLag 0.2`), and it opens out wider before closing back in
+(`squadSpacingVariance 0.7`). Normal takes both away. Everything else about them is identical.
 
 **Shared tuning**: the rest of the lever set, grouped by what it does. Same defaults across all these
 presets unless the Default column says otherwise (`seconds >= 0` or `metres`, floats).
@@ -554,10 +582,10 @@ presets unless the Default column says otherwise (`seconds >= 0` or `metres`, fl
 | `offensiveRangeVariance` | `0.1` | Random jitter added on top of `offensiveRange`. |
 | `defensiveRange` | `2.0` | Reading spacing it guards from (metres). |
 | `defensiveRangeVariance` | `0.4` | Random jitter added on top of `defensiveRange`. |
-| `attackRange` | `2.0` | How close before a press attack (throwing first) commits a stab, in metres. A riposte ignores this and always throws at the target, so a stationary bot still counters an attacker who backed off. |
+| `attackRange` | `2.0` | How close a press attack commits a stab. A riposte ignores this. |
 | `riposteWindow` | `0.6` | How long the post-block counter stays available (seconds). |
-| `passiveRange` | `0.6` | `Dueling` tiers only: the hold distance while waiting. Kept small so the bot stands its ground instead of backing off to `defensiveRange` from an approaching player. It uses `defensiveRange` once engaged. |
-| `passiveBlockReaction` | `0` | The block reaction beat used **while waiting to be provoked**, instead of `blockReactionMin`/`Max`. Instant by default: at `DuelingEasy` or `GroupEasy` speeds an ordinary walk-up stab would otherwise kill the bot before its guard comes up, ending a 2v1 before it starts. Raise it for a station that punishes a sloppy approach. Not randomised, unlike the fighting beat. Only used while `engageOnAttack` is on. |
+| `passiveRange` | `0.6` | `Dueling` tiers: hold distance while waiting. Uses `defensiveRange` once engaged. |
+| `passiveBlockReaction` | `0` | Block reaction beat while waiting to be provoked, instead of `blockReactionMin`/`Max`. Not randomised. |
 
 **Targeting**
 
@@ -565,125 +593,73 @@ The rest of the targeting set (`targetRange`, `stickyTarget`, `engageOnAttack`) 
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `ignoreTeam` | `true` | Target any player regardless of faction (`false` = enemies only). Defaults to `true` so you don't have to be on the opposing team to use a bot. |
+| `ignoreTeam` | `true` | Target any player regardless of faction. `false` = enemies only. |
 | `ignoreBots` | `true` | Target only human players, skipping bots. Defaults to `true` so bots focus the player and don't provoke each other. |
 
 **Guard**
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `guard` | `false` (`true` for `Guardian`) | Act as an escort for `guardTarget`. Every summon hands the bot a guard target, so turning this on makes any melee bot escort whoever summoned it. |
-| `guardTarget` | `0` | The player id this bot escorts, `0` for none. Set automatically by `summon` / `summonLine` (the caller) and `summonAt` / `summonLineAt` (the target). Set it later on a whole squad with `rc bot cfg <target> guardTarget <playerId>`. Only has an effect while `guard` is on. |
-| `guardRange` | `10` | `Guardian`: an enemy this close **to the guarded player** pulls the bot into the fight. It returns to escorting once the enemy is clear of this range again. |
+| `guard` | `false` (`true` for `Guardian`) | Act as an escort for `guardTarget`. |
+| `guardTarget` | `0` | The player id this bot escorts, `0` for none. Set automatically by the summon commands. |
+| `guardRange` | `10` | An enemy this close to the guarded player pulls the bot into the fight. |
 | `guardFollowRange` | `3` | `Guardian`: how far from the guarded player the bot holds station while nothing is happening. |
-| `separationRange` | `0.8` for `Dueling*` / `Group*` / `Test`, `1.5` for `Guardian`, `0` otherwise | Push apart from other bots within this many metres, `0` to disable. Keeps bots from stacking up and swinging through each other. Kept just under `squadSpacing` for the formation presets so it resists overlap without fighting the formation. Applies while a bot is moving on its own, not while holding a slot. |
+| `separationRange` | `0.8` for `Dueling*` / `Group*` / `Test`, `1.5` for `Guardian`, `0` otherwise | Push apart from other bots within this many metres. `0` disables. |
 
 **Formation**
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `squad` | `true` for `Dueling*` / `Group*` / `Test`, `false` otherwise | Stand in a formation with the rest of its spawn batch, and with any other engaged batch on the same player. Gives **spacing and lane discipline only**. Bots take a slot instead of crowding, and hold a swing that would go through a squadmate. Does nothing to a bot fighting alone. Members stand on a circle around a point, held square to the enemy so the gap between them always faces them. As the enemy circles, members ride that circle, one giving ground while the other comes forward. |
-| `coordinate` | `0`–`1`. `0.5` neutral, and the `Dueling*` default. `Group*`: `0.3` Easy, `0.5` Normal, `1` top | **The updown axis**, decided once per swing as it starts. `1` always throws the opposite direction to its neighbour, which is unblockable. `0` always throws the *same* direction, refusing the updown. `0.5` is a free pick. Neutral sits in the middle rather than at the bottom because two bots choosing independently already updown about half the time. Below `0.5` is worse than chance. Above `0.5` also ramps up sharing their guard, so a stab either turns aside frees both to counter. Needs `squad`. |
-| `slotError` | `0.9` Easy, `0.5` Normal, `0` top tier | The furthest a bot may stand from its place on the ring, in metres. Magnitude and direction are rolled when it forms up and **held for the bout**, so the gap stays readable inside a fight and is fresh on the next attempt. Because it rolls from zero, some bouts they line up properly and the gap isn't there. Needs `squad`. |
-| `formationLag` | `1.2` Easy, `0.6` Normal, `0` top tier | The longest a bot may work from a stale slot, in seconds. It re-checks its slot on a randomised interval up to this, so it is late reacting when you press in, back off, or run around the formation. At `0` it tracks perfectly. Needs `squad`. |
-| `stabSeparation` | `0.35` GroupEasy, `0.25` GroupNormal, `0.15` GroupHard, `0` elsewhere | The smallest gap between two opposite stabs from one formation, in seconds. A player guards one direction at a time, so opposite stabs thrown closer together than this cannot be blocked at all: the formation holds the second one back until the gap is met. `0` leaves them unblockable, which is what plain `Group` is. This only ever pushes stabs further apart, never closer, so other levers may still space them out on their own. Needs `squad`. |
-| `squadSpacing` | `0.9` | Gap between neighbouring bots, and the diameter of a pair's circle. Measured as the widest gap a player cannot jump between. Lower it if the pair struggles to keep up with someone running around them. |
-| `laneHalfWidth` | `0.5` | How close a squadmate may be to the swing line before the shot counts as blocked, roughly a body width. Raise it if bots still clip each other, but keep it under `squadSpacing` or a partner standing alongside will block every stab. Gates whether a swing may **start**; mid-swing safety is `clampRadius` below. |
-| `squadStandoff` | `1.5` | Range the formation's point holds from the enemy. It only repositions when the enemy leaves that range, so someone circling at a steady distance makes the pair rotate, while someone closing in or backing off tows the formation along. `1.5` is the practical ceiling. Members sit half a spacing off the point, so anything higher gives a player room to walk around one and line the pair up. |
+| `squad` | `true` for `Dueling*` / `Group*` / `Test`, `false` otherwise | Stand in a formation with the rest of the spawn batch, and with any other engaged batch on the same player. Spacing and lane discipline only. |
+| `coordinate` | `0`–`1`. `0.5` neutral, and the `Dueling*` default. `Group*`: `0.97` Easy, `0.98` Normal, `1` top | The updown axis, decided per swing. `1` always throws opposite to the neighbour, `0` always the same, `0.5` a free pick. Above `0.5` also shares the guard. Needs `squad`. |
+| `slotError` | `0.9` DuelingEasy, `0.5` DuelingNormal / GroupEasy / GroupNormal, `0.1` GroupHard, `0` Dueling and Group | The furthest a bot may stand from its place on the ring, in metres. Re-rolled every few seconds. Needs `squad`. |
+| `formationLag` | `1.2` DuelingEasy, `0.6` DuelingNormal, `0.2` GroupEasy, `0` GroupNormal and top tiers | The longest a bot may work from a stale slot, in seconds. `0` tracks perfectly. Needs `squad`. |
+| `stabSeparation` | `0.35` GroupEasy, `0.25` GroupNormal, `0.15` GroupHard, `0` elsewhere | Smallest gap between two opposite stabs from one formation. `0` leaves them unblockable. Needs `squad`. |
+| `aimPitch` | `0` | Vertical aim in the engine's pitch scale, `0` level and negative down. Blade geometry follows it automatically. |
+| `squadSpacing` | `0.85` | The tightest the line ever stands, and the floor its breathing works up from. |
+| `squadSpacingVariance` | `0.7`; `Group*`: `0.5` Easy, `0.3` Normal, `0.1` Hard, `0` Group | How much wider than `squadSpacing` the line may drift mid-fight. Only while engaged; a posted line settles back to the floor. `0` = a fixed gap. Needs `squad`. |
+| `laneHalfWidth` | `0.5` | How close a squadmate may be to the swing line before the shot counts as blocked. Keep it under `squadSpacing`. |
+| `squadStandoff` | `1.5` | Range the formation's point holds from the enemy. `1.5` is the practical ceiling. |
 
 **Mate avoidance**
 
-How a bot keeps its own bayonet off the squadmate beside it. See **Mid-swing aim control** below for the geometry these describe, and the engine constants after it for the parts that are measurements rather than settings.
+How a bot keeps its own bayonet off the squadmate beside it.
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `gateRadius` | `0.3` | Half-width used to **refuse a stab outright**. This is the only lever here that costs aggression — raise it and bots throw fewer stabs. Kept narrow deliberately; safety lives in `clampRadius` instead. Raise it only if bots kill through stabs they should never have started. |
-| `clampRadius` | `0.4` | Half-width used to **stop the bot turning** mid-stab. Costs tracking and nothing else: it never cancels a swing, so it can be generous. `0.4` is ~28° at 0.85m, which with `bladeMargin` puts the edge at 33° — the bottom of the 33–42° band the surviving kills sat in. Tuned in play as the point where bots still fence rather than flinch, so expect the odd team kill at the wide end; raise toward `0.55` to buy those back. |
-| `bladeMargin` | `5` | Degrees of slack kept outside a mate's band rather than stopping on its boundary. Sitting exactly on the edge produced 13 of 18 friendly hits at precisely `off = ±half` in one run, and the band is fitted to a single spacing so it deserves the slack. |
-| `mateCrowdDistance` | `0.8` | A mate closer than this, and anywhere ahead of the blade, blocks the stab **at any bearing**. Applies to the **clamp only** — on the gate it was the main cause of bots refusing to throw. `0` disables it. Ramped in over the closing distance rather than switched on at the threshold: as a hard switch it stepped the band from ~30° to 90° the instant a mate crossed the line, and a partner shuffling either side of it moved the clamp target by tens of degrees per tick, which showed up as coarse mid-stab turning. Bearing stops predicting anything at close range: the band is an angle from the bot's chest while the blade is a segment swinging 0.9–2.0m out, so rotating at all drags the arc through someone standing right there. Every kill that survived the band fix was a crowded mate at 0.77–0.82m and 66–72°, where the band said clear. Covering that through the gate alone would make bots passive everywhere. Should only bite when a formation compresses below its spacing, which `separationRange` already pushes back on. |
-| `gateOnMate` | `false` | Hold fire entirely while a mate stands in the blade's band, instead of stabbing and hoping. This is the only mechanism that can reliably help once geometry is right, because a live stab lasts ~0.4s and the bot turns a median 3° per tick, which is not enough to clear the band. A blocked bot keeps its guard up and stabs as soon as the line opens. Costs aggression when you stand on its mate's side. |
-| `abortOnMate` | `false` | Block to cancel the bot's own stab when a mate is already across the blade and no aim clamp can save them. Raising a guard marks the strike deleted server-side, so this genuinely stops the hit, at the cost of a stab that reads as a flinch. Unreliable in practice: two hits landed anyway while it was enabled. Last resort, not a fix. |
+| `gateRadius` | `0.3` | Half-width used to refuse a stab outright. The only mate-avoidance lever that costs aggression. |
+| `clampRadius` | `0.4` | Half-width used to stop the bot turning mid-stab. Costs tracking only, never cancels a swing. |
+| `bladeMargin` | `5` | Degrees of slack kept outside a mate's band rather than stopping on its boundary. |
+| `mateCrowdRatio` | `1` | A mate closer than this many formation spacings blocks the stab at any bearing ahead. Clamp only, `0` disables. |
+| `mateConeFloor` | `28` | The narrowest the danger cone around a squadmate may get, in degrees. Clamp only, never the release gate. |
+| `gateOnMate` | `true` | Hold fire while a mate stands in the blade's band, instead of stabbing and hoping. |
+| `abortOnMate` | `false` | Block to cancel the bot's own stab when a mate is already across the blade. Unreliable. |
 
 **Stations**
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `post` | `true` for `Dueling*` / `Group*` / `Test`, `false` otherwise | Make it a drill station: remember where it was set up, wait there until provoked, and walk back afterwards, whether it won or was killed and replaced. Independent of `squad`, so it works on a single bot of any melee preset. On a `RiposteDummy` pair it with `move true`, or there is nothing for it to walk back with. On a group it also means all of them wake together. See **[Group drill stations](#group-drill-stations)**. |
-| `breakoff` | `false` (`true` for `Group*`) | Once provoked, give ground and re-form before throwing anything, so the bout starts from a clean approach rather than from wherever the provoking blow landed. Needs `post`. With `post` on and this off, a provoked bot piles straight in. |
-| `breakoffRange` | `4` | **Ground given, not range held.** The group backs up at most this many metres from where it was standing when provoked, then stops. Walking at them after that closes the distance normally, which is the point: holding a range from the player instead meant a group could be pushed backwards for as long as you kept advancing, so a bout could be chased around without ever starting. Bounded as a radius from the starting point, so circling behind them does not buy another full retreat. Raise it for a longer run-in, lower it to get to blows sooner. Only used while `breakoff` is on. |
-| `engageDelay` | `0` (`2` for `Group*`) | Seconds from the **first provocation** before the group may swing or counter. It blocks normally throughout. A layer on top of `breakoff` rather than part of it, so a station told to fight from where the blow landed can still be told to wait a beat first. Timed from the provocation and not from the end of the retreat on purpose: chaining them would add a long `breakoffRange` and a long delay into a wait nobody asked for, whereas running them together means a short retreat still leaves the group standing for the remainder and a long one has already paid for itself. Only used while `post` is on. |
-| `resetRange` | `0` | How far the target may get from the post before the group gives up on the bout. **`0`, the default, removes the limit** (same convention as `targetRange` and `separationRange`), so a bout ends when won or lost rather than when someone steps away. Set a distance to fence the drill into an area instead. Only used while `post` is on. |
-| `minMembers` | `0` (`2` for `Group*`) | The fewest members the batch will fight with. Drop below it and the bout is over: the group withdraws, returns to the post, and will not be provoked again until back up to strength. `0` fights on however few are left. Set it to the smallest count the drill is still *about*. On a trio, `2` keeps a 3v1 running as a 2v1 and calls it when the next death would make it a 1v1. **Capped by the batch's own size**, so `2` does not apply to a bot summoned on its own. Needs the `Replace` death policy to recover. Only used while `post` is on.<br><br>It also decides **how long a formation lasts.** Above `0` the group holds together through the bout and its `returnDelay`, which lets gathered bots keep working as a group. At `0` the formation breaks up the moment the bout ends and each bot has to be provoked again. |
-| `holdReplacement` | `false` (`true` for `Group*`) | A dead member's replacement waits for the bout to finish instead of walking back into it. This is what makes `minMembers` mean anything. Without it a 3v1 is a 2v1 for a few seconds and then a 3v1 again. Capped at two minutes. **Only a member killed by the group's own opponent is held** — a bot cut down by another group's stray stab, or slayed by an admin, was never part of the bout and comes straight back, since waiting on a fight it was not in would leave the group short until the cap. Set it `false` for an endurance grind where bots keep feeding in mid-fight. Only used while `post` is on. |
-| `returnDelay` | `30` | Seconds the group holds where the bout ended before walking back to the post. It keeps formation and stays provokable throughout, so repeat attempts do not mean following the bots home, while a station left alone still tidies itself up. Only used while `post` is on. |
-**Attacker-lock** (automatic, no lever): once a player within melee range begins a strike, the bot locks onto them through the exchange, including its riposte, regardless of who else is closer, so it can't be pulled off an attacker mid-fight.
+| `post` | `true` for `Dueling*` / `Group*` / `Test`, `false` otherwise | Make it a drill station: wait on the mark, and walk back afterwards. Independent of `squad`. |
+| `breakoff` | `false` (`true` for `Group*`) | Once provoked, give ground and re-form before throwing anything. Needs `post`. |
+| `breakoffRange` | `2` | Ground given once, in metres, measured from where the group was provoked rather than held from the player. Needs `breakoff`. |
+| `engageDelay` | `0` (`1.5` for `Group*`) | Seconds from the first provocation before the group may swing or counter. It blocks throughout. Needs `post`. |
+| `resetRange` | `0` | How far the target may get from the post before the group gives up. `0` = no limit. |
+| `minMembers` | `0` (`2` for `Group*`) | Fewest members the batch will fight with; below it the bout ends and the group withdraws. Capped by the batch's own size. Needs `post`. |
+| `holdReplacement` | `false` (`true` for `Group*`) | A dead member's replacement waits for the bout to finish. Only for a member killed by the group's own opponent. Needs `post`. |
+| `returnDelay` | `30` | Seconds the group holds where the bout ended before walking back to the post. |
+**Automatic behaviours** — no lever of their own, or tuned only by the mate-avoidance levers above.
 
-**Mid-swing aim control** (automatic, tuned by `clampRadius`): a stab is live for its whole
-duration and the server re-runs the hit test every frame from the bot's *current* facing, joining the blade's
-position between frames with rays. A bot that keeps tracking a moving player therefore drags its bayonet across
-anyone it sweeps past, which is what killed squadmates. While a swing is live the aim is limited to how far it
-may turn **toward** a mate rather than only where it ends up, since the arc between two frames is exactly what
-the game sweeps. Turning away is never restricted. The stab still flies either way, it just stops turning, which
-is what a player does. Spacing is not the fix: a mate only has to be missed, not cleared by a wide margin.
+| Behaviour | What it does |
+| --- | --- |
+| Attacker-lock | Holds onto whoever is mid-strike within melee range, through the exchange and the riposte. |
+| Mid-swing aim clamp | While a stab is live the aim may not turn further *toward* a squadmate. Turning away is never restricted. |
+| Blade hold | A bot whose target dies mid-stab holds its facing until the blade is back in. |
+| Vertical gate | Squadmates more than 1.5m above or below are ignored — the engine cannot hit them either. |
+| Line-of-fire refusal | Won't throw when the target is in line with a squadmate. Needs `gateOnMate`. |
 
-The bot **turns as far as the band allows and stops there**, rather than freezing its heading outright.
-Freezing was a workaround from when the band was far too narrow: 13 of 18 logged hits then landed with the mate
-at exactly the boundary, because the edge itself was not safe. With the band sized properly and `bladeMargin`
-holding it off the boundary, the edge *is* safe, and stopping short of it only throws away tracking.
+`BladeBearing`, `BladeReach` and `StrikeCommitWindow` are engine constants in `MeleeAi.cs`, resolved from the
+game's own strike table against `aimPitch`. They are measurements, not settings — don't tune them.
 
-Freezing cost far more than it looked. With a 46 degree band, a bot whose target sat past that on its mate's
-side held its aim for the entire swing and then snapped back at the end, which reads in play as the bot turning
-away to stab and dragging back afterwards.
-
-**The angular band is an approximation and is known to leak.** It samples the heading at 20Hz while the game
-stitches the blade's path between its own frames, so a large enough turn sweeps a mate entirely between two
-samples with neither end of the turn pointed at anybody. There was a `swingTurnRate` lever that capped the turn
-for exactly that reason. It is gone: a rate ceiling cannot tell turning-to-track from turning-through-a-mate, so
-it throttled both. Measured in play, 100 deg/s already loses a player circling at 1.5m, while a rate slow enough
-to stop the drag is far below that. `gateRadius` and `clampRadius` are likewise fitted to observed kills at one
-spacing, not derived.
-
-### Engine constants (not levers)
-
-Three numbers the mate-avoidance code needs are **measurements of the weapon**, not balance settings, so they
-are constants in `MeleeAi.cs` rather than levers. Answering a game patch means re-measuring them. They sit
-alongside the strike timings already there (`WindupSeconds`, `MissedStabDuration`, `SpawnStrikeDelay`).
-
-| Constant | Value | What it measures |
-| --- | --- | --- |
-| `BladeBearing` | `16` (degrees) | How far the blade sits off the facing, positive to the bot's right, and so the centre of the forbidden band. **The game's own figure**, read out of the baked strike data by MeleeLogger's `reach` line (`bearing=16.6` High, `15.6` Low at pitch 0). A bayonet thrust does not run down the centreline, which is why `AimOffset` already shifts the aim left to centre it on a target. At `0` the clamp is too tight on the bot's left and too loose on its right. The game's figure climbs steeply with pitch, 42 degrees at pitch 2, so `16` holds only while bots aim level, which they currently do. |
-| `BladeReach` | `2.05` (metres) | How far the blade line extends. Mates beyond it cannot be hit and are ignored. The weapon point sits ~0.9m ahead of the body and the blade ray runs 1.14m past it. |
-| `StrikeCommitWindow` | `0.9` (seconds) | How long after the release the blade is treated as out, and so how long the mate clamp and the release gate hold. Too short and the bot snaps to the player with the weapon still out, the single worst turn in the stab. Does **not** include the first-strike nerve bonus, which only delays blocking. |
-
-#### Measuring `StrikeCommitWindow`
-
-`0.9` was found in game, and the source figures disagree with it for a reason worth knowing.
-
-The source says 0.70 — `initialProcessingDelay` 0.28 plus `duration` 0.42 — and MeleeLogger's frame dump puts the
-game's own `IsPlayerMeleeAttacking` span at about 0.68, which agrees. **Both are too short**, because they
-measure from the moment the *game* starts executing the strike, while this constant measures from the moment
-*MDS commands* the release. The missing ~0.2s is the command path between the two. Re-measure if the bot tick
-rate or the command path ever changes.
-
-To measure it directly rather than by bisection, run both diagnostics on one bot:
-
-```
-rc meleeLogger frames true
-rc bot probe <botId> on
-```
-
-MDS logs when it commands the release (`actions=[...,ExecuteMeleeWeaponStrike]`) and MeleeLogger's frames carry
-`atk=`. Line the timestamps up: release to first `atk=1` is the command path plus processing delay, release to
-last `atk=1` is the window.
-
-*Example: pick a difficulty out of the box, or fine-tune one lever.*
-
-```
-rc bot summon Defending ArmyLineInfantry DuelingEasy
-rc bot cfg <id> blockReactionMax 0.6   # make this one even slower
-```
-
----
 
 ## Configurables
 
@@ -889,26 +865,10 @@ mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Re
 
 ### MDS cannot read the game's own code
 
-Worth recording, because it was tried and it does not work. A bundled second DLL referencing `Assembly-CSharp`
-builds fine and then fails at runtime with `FileNotFoundException`. UMod loads mod assemblies with
-`Assembly.Load(byte[])` and registers no `AssemblyResolve` handler, so nothing the mod ships alongside itself can
-ever bind. Only a mod that is **entirely** one prebuilt assembly can reference the game, because then UMod loads
-that assembly directly.
-
-Two consequences MDS lives with:
-
-- **Admin detection only sees admins who typed a password.** `IsPlayerAdmin` is tracked from `OnRCLogin`. The
-  game's own answer, `ServerRemoteConsoleAccessManager.IsLoggedIn`, covers whitelisted auto-admins too, but it is
-  out of reach. `OnPlayerConnected`'s `isAutoAdmin` is no substitute: the single call site in `Assembly-CSharp`
-  passes `false` literally.
-- **Weapon strike properties cannot be read.** They are serialised per weapon class and resolvable only off the
-  live weapon, so the figures in the game's decompiled source are just unconfigured defaults.
-
-The **MeleeLogger** mod exists for the second one. It is a single prebuilt assembly, so it reads game state
-directly and writes to the same server log. Run it alongside MDS and read the two logs side by side. Closing the
-first would mean converting all of MDS to a prebuilt assembly.
-
----
+UMod loads mod assemblies with `Assembly.Load(byte[])` and registers no `AssemblyResolve` handler, so MDS cannot
+reference `Assembly-CSharp`. Everything it knows about the game comes through `IHoldfastSharedMethods` and the
+`carbonPlayers` console commands. The companion **MeleeLogger** mod is a prebuilt DLL that *can* read game
+internals; run it alongside when you need weapon or hitbox figures.
 
 ## Future Features
 

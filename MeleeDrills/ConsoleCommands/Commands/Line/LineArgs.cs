@@ -6,9 +6,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // Shared parsing/dispatch for the '[count] [spec...]' tail of summonLine / spawnLine.
-    // count: optional leading positive int (overrides the lineBotCount config default).
-    // spec : reuses BotSpawnArgs (faction/class default to caller; ai/death to config defaults).
+    // Shared parsing and dispatch for the '[count] [spec...]' tail the line commands share.
     public static class LineArgs
     {
         public static bool ValidateTail(string[] tail, out string error)

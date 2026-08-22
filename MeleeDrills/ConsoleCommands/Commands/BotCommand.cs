@@ -1,10 +1,7 @@
 using System;
 using MDS.Core;
 
-// rc bot <spawn|ai|remove|list> [args]
-// Thin dispatcher: parses the subcommand keyword to a BotCommandEnum, looks up its handler in the
-// BotSubCommandRegistry, and delegates validation/execution - mirroring how Get/Set delegate to
-// configurables. Each subcommand owns its own validation in its own file (Commands/Bot/).
+// rc bot <subcommand> [args] - dispatches to the registered IBotSubCommand handlers.
 
 namespace MDS.ConsoleCommands
 {

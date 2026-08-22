@@ -7,21 +7,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot move <bots> <behavior> [args]
-    //   seek      <dest> [facing <dest>] [flags]  - run toward a point/player
-    //   arrive    <dest> [facing <dest>] [flags]  - like seek, but decelerate to a smooth stop
-    //   flee      <dest> [facing <dest>] [flags]  - run directly away; e.g. 'flee me facing me' = backpedal
-    //   pursue    <dest> [facing <dest>] [flags]  - lead a moving target to intercept it (predictive seek)
-    //   evade     <dest> [facing <dest>] [flags]  - flee from where a target is heading (predictive flee)
-    //   wander    [flags]                         - roam continuously with gentle random turns
-    //   facepoint <dest>                          - rotate in place to face a point/player
-    //   face      <deg>                           - rotate in place to a heading (degrees from North)
-    //   stop                                      - halt movement
-    // <dest> is 'x z', a <playerId>, or me (a player or me dest is tracked live). [flags] are blended corrective
-    // steering, any combination: 'separate' (spread apart from bots), 'avoid' (steer around walls), 'dodge' (steer
-    // around moving agents). An optional 'facing <dest>' decouples facing from travel. <bots> selects which bots
-    // get the order (playerId, all, attacking, defending, or a faction). Orders only apply to bots already on the
-    // Manual AI ('rc bot setBotAi <bots> Manual'); bots on other AIs are untouched.
+    // rc bot move <bots> <behavior> [args] - drives the Manual test AI's steering behaviours.
     public class MoveSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Move;
