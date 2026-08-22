@@ -143,6 +143,14 @@ All commands must be prefixed with `rc` and require admin.
   rc openmelee
   ```
 
+### `shootingTraining`
+
+**Usage:** `rc shootingTraining`
+
+* Toggle. Turns infinite firearm ammo and firearm trajectory lines on, and off again on the next call.
+* Takes no arguments. Replies with the new state.
+
+
 ### `bot`
 
 **Usage:** `rc bot <subcommand> [args]`
@@ -539,9 +547,7 @@ Every formation lever is **the worst a bot may be, not how bad it is**. Each rol
 
 **Reaction beats**: the levers that separate the tiers (`seconds ≥ 0`).
 
-The `Group` tiers used to share these columns with their `Dueling` counterparts. **They no longer do** — the
-Group ladder was retuned in play and moved down a step, so `GroupEasy` is what `GroupNormal` used to be. The two
-families are listed separately below because a value meant for one was otherwise landing silently on the other.
+The `Dueling` and `Group` families have separate ladders.
 
 *Dueling family, plus the two standalone presets:*
 
@@ -553,23 +559,18 @@ families are listed separately below because a value meant for one was otherwise
 | `riposteReactionMax` | `1.1` | `0.5` | `0.8` | `0.5` | `0` | Max of that delay. |
 | `attackReadBeat` | `1.2` | `0.6` | `0.9` | `0.6` | `0.3` | Extra randomised beat on the attack cooldown. Lower presses faster. |
 
-*Group family. Every tier now answers at full speed — difficulty lives in the formation levers below, not in the
-reaction beats:*
+*Group family:*
 
-| Lever | `GroupEasy` | `GroupNormal` | `Group` / `GroupHard` |
-| --- | --- | --- | --- |
-| `blockReactionMin` / `Max` | `0.1` / `0.2` | `0.1` / `0.2` | `0` / `0` |
-| `riposteReactionMin` / `Max` | `0` / `0.5` | `0` / `0.5` | `0` / `0.1` Hard, `0` / `0` Group |
-| `attackReadBeat` | `0.1` | `0.3` | `0.3` |
-| `slotError` | `0.5` | `0.5` | `0.1` Hard, `0` Group |
-| `formationLag` | `0.2` | `0` | `0` |
-| `coordinate` | `0.97` | `0.98` | `1` |
-| `stabSeparation` | `0.3` | `0.25` | `0.15` Hard, `0` Group |
-| `squadSpacingVariance` | `0.5` | `0.3` | `0.1` Hard, `0` Group |
-
-`GroupEasy` and `GroupNormal` are deliberately close. Easy gives you exactly two things to work with: the line is
-late noticing its slot has moved (`formationLag 0.2`), and it opens out wider before closing back in
-(`squadSpacingVariance 0.7`). Normal takes both away. Everything else about them is identical.
+| Lever | `GroupEasy` | `GroupNormal` | `GroupHard` | `Group` |
+| --- | --- | --- | --- | --- |
+| `blockReactionMin` / `Max` | `0.1` / `0.2` | `0.1` / `0.2` | `0` / `0` | `0` / `0` |
+| `riposteReactionMin` / `Max` | `0` / `0.5` | `0` / `0.5` | `0` / `0.1` | `0` / `0` |
+| `attackReadBeat` | `0.1` | `0.3` | `0.3` | `0.3` |
+| `slotError` | `0.5` | `0.5` | `0.1` | `0` |
+| `formationLag` | `0.2` | `0` | `0` | `0` |
+| `coordinate` | `0.97` | `0.98` | `1` | `1` |
+| `stabSeparation` | `0.3` | `0.25` | `0.15` | `0` |
+| `squadSpacingVariance` | `0.5` | `0.3` | `0.1` | `0` |
 
 **Shared tuning**: the rest of the lever set, grouped by what it does. Same defaults across all these
 presets unless the Default column says otherwise (`seconds >= 0` or `metres`, floats).
@@ -647,20 +648,6 @@ How a bot keeps its own bayonet off the squadmate beside it.
 | `minMembers` | `0` (`2` for `Group*`) | Fewest members the batch will fight with; below it the bout ends and the group withdraws. Capped by the batch's own size. Needs `post`. |
 | `holdReplacement` | `false` (`true` for `Group*`) | A dead member's replacement waits for the bout to finish. Only for a member killed by the group's own opponent. Needs `post`. |
 | `returnDelay` | `30` | Seconds the group holds where the bout ended before walking back to the post. |
-**Automatic behaviours** — no lever of their own, or tuned only by the mate-avoidance levers above.
-
-| Behaviour | What it does |
-| --- | --- |
-| Attacker-lock | Holds onto whoever is mid-strike within melee range, through the exchange and the riposte. |
-| Mid-swing aim clamp | While a stab is live the aim may not turn further *toward* a squadmate. Turning away is never restricted. |
-| Blade hold | A bot whose target dies mid-stab holds its facing until the blade is back in. |
-| Vertical gate | Squadmates more than 1.5m above or below are ignored — the engine cannot hit them either. |
-| Line-of-fire refusal | Won't throw when the target is in line with a squadmate. Needs `gateOnMate`. |
-
-`BladeBearing`, `BladeReach` and `StrikeCommitWindow` are engine constants in `MeleeAi.cs`, resolved from the
-game's own strike table against `aimPitch`. They are measurements, not settings — don't tune them.
-
-
 ## Configurables
 
 *(Defaults shown are tuned for Palisade Arena A1.)*
@@ -858,17 +845,6 @@ mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Re
 ```
 
 ---
-
-## Building
-
-`MeleeDrills/` is compiled by Unity with the rest of the mod. Nothing extra to do.
-
-### MDS cannot read the game's own code
-
-UMod loads mod assemblies with `Assembly.Load(byte[])` and registers no `AssemblyResolve` handler, so MDS cannot
-reference `Assembly-CSharp`. Everything it knows about the game comes through `IHoldfastSharedMethods` and the
-`carbonPlayers` console commands. The companion **MeleeLogger** mod is a prebuilt DLL that *can* read game
-internals; run it alongside when you need weapon or hitbox figures.
 
 ## Future Features
 
