@@ -5,18 +5,7 @@ using MDS.Systems;
 
 namespace MDS.ConfigVariables
 {
-    // mod_variable MDS:SpawnBot:x,z,rotation[,faction][,class][,ai][,death][,name[,regtag[,uniformId]]]
-    //
-    // Schedules a single bot to spawn at a world position when the round begins. Specify it multiple times for
-    // multiple bots. This is SpawnLine with a count of one, so it shares the same staging: entries are held until
-    // the round starts and replayed every round. The positional rules match the runtime command:
-    //   - x,z,rotation : required. World position and facing (degrees from North).
-    //   - faction      : optional. 'attacking' (default), 'defending', or a faction name such as French.
-    //                    attacking and defending are resolved against the live round at spawn time.
-    //   - class        : optional. Defaults to ArmyLineInfantry.
-    //   - ai,death     : optional. Default to botDefaultAi and botDefaultDeathPolicy.
-    //   - name/regtag/uniformId : optional identity extras, same as the command.
-    // There is no count field; use SpawnLine for more than one bot.
+    // mod_variable MDS:SpawnBot:x,z,rotation[,faction][,class][,ai][,death] - one bot placed at map load.
     public class SpawnBot : IConfigVariables
     {
         public ConfigCommandEnum CommandName => ConfigCommandEnum.SpawnBot;

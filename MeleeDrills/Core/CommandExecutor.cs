@@ -22,9 +22,7 @@ namespace MDS.Core
             Debug.Log("[MDS] Console found.");
         }
 
-        // logResult=false marks a HIGH-FREQUENCY command (the per-tick bot input channels, which fire for
-        // every bot every tick and would otherwise bury the debug log). Failures and exceptions are still
-        // reported either way, so a genuinely broken command never goes silent.
+        // logResult=false marks a high-frequency command so it does not flood the log.
         public static void ExecuteCommand(string command, bool logResult = true)
         {
             if (_gameMethods == null)

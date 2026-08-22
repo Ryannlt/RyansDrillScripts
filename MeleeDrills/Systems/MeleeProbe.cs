@@ -4,20 +4,93 @@ using HoldfastSharedMethods;
 
 namespace MDS.Systems
 {
-    // Dev and instrumentation tool with no gameplay effect. Logs a chosen player's melee-relevant packet signals
-    // so we could learn the exact PlayerActions vocabulary and timings before coding the block logic: which tokens
-    // mean attack high/low/left/right versus block, the lead time from a windup to the hit, and the recovery
-    // window after. Toggle it with 'rc bot probe <id|me>'.
-    //
-    // To keep the log readable it prints a player's actions only when the set changes, with a monotonic timestamp
-    // and the delta since the last change, so the stream reads as a clean windup, release, hurt, recovery
-    // timeline. Probe both fighters at once (it holds a set) to interleave attacker and victim. OnPacket fires for
-    // every player every packet, so it fast-exits when nothing is being probed.
+    // Dev instrumentation with no gameplay effect. Logs a probed player's melee signals only when they change.
     public static class MeleeProbe
     {
         private static readonly HashSet<int> _probed = new();
         private static readonly Dictionary<int, string> _lastActions = new();
         private static readonly Dictionary<int, float> _lastChangeTime = new();
+
+        public static bool IsProbing(int playerId) => _probed.Contains(playerId);
+
+        // The last swing a bot released, kept for every bot: friendly kills are rare and are what is being hunted.
+        private struct StrikeRecord
+        {
+            public float ReleasedAt;
+            public float AimDesired;   // heading the swing wanted
+            public float AimClamped;   // heading it was allowed after clearing squadmates
+            public int TargetId;
+            public bool LaneClear;     // what the start gate thought when the swing began
+        }
+
+        private static readonly Dictionary<int, StrikeRecord> _lastStrike = new();
+
+        public static void NoteStrike(int playerId, float now, float aimDesired, float aimClamped, int targetId, bool laneClear)
+        {
+            _lastStrike[playerId] = new StrikeRecord
+            {
+                ReleasedAt = now,
+                AimDesired = aimDesired,
+                AimClamped = aimClamped,
+                TargetId = targetId,
+                LaneClear = laneClear,
+            };
+        }
+
+        // One line per tick while a swing is live. actual is where the blade points now, clamped is where we told it.
+        public static void LogSwingTick(int playerId, float actual, float desired, float clamped, float turned,
+                                        bool mateAcross, float gateR, float clampR, string mates)
+        {
+            Logger.Log(
+                $"MeleeSwing[{playerId}] actual={actual:0.#} desired={desired:0.#} clamped={clamped:0.#} " +
+                $"held={Mathf.DeltaAngle(desired, clamped):0.#} turned={turned:0.#} across={mateAcross} " +
+                $"gateR={gateR:0.##} clampR={clampR:0.##}{mates}",
+                LogLevel.INFO);
+        }
+
+        // One line per friendly-fire kill, in the killer's own aim frame.
+        public static void LogFriendlyFire(int killerId, int victimId, Vector2 killerPos, float killerHeading, Vector2 victimPos)
+        {
+            Vector2 toVictim = victimPos - killerPos;
+            float dist = toVictim.magnitude;
+
+            Vector2 forward = MovementSolver.DirectionFromHeading(killerHeading);
+            Vector2 right = new Vector2(forward.y, -forward.x);
+
+            float along = Vector2.Dot(toVictim, forward);
+            float lateral = Vector2.Dot(toVictim, right);
+            float bearing = Mathf.DeltaAngle(killerHeading, MovementSolver.HeadingOf(toVictim));
+
+            string strike = "no strike on record";
+            if (_lastStrike.TryGetValue(killerId, out StrikeRecord r))
+            {
+                // bearingAtRelease measures the victim against where the bot was pointing when it committed.
+                float bearingAtRelease = Mathf.DeltaAngle(r.AimClamped, MovementSolver.HeadingOf(toVictim));
+
+                strike = string.Format("strikeAge={0:0.00} bearingAtRelease={1:0.#} desired={2:0.#} clamped={3:0.#} moved={4:0.#} target={5} laneClear={6}",
+                    Time.realtimeSinceStartup - r.ReleasedAt,
+                    bearingAtRelease,
+                    r.AimDesired,
+                    r.AimClamped,
+                    Mathf.DeltaAngle(r.AimDesired, r.AimClamped),
+                    r.TargetId,
+                    r.LaneClear);
+            }
+
+            Logger.Log(
+                string.Format("FriendlyFire: {0} killed {1} | dist={2:0.00} bearing={3:0.#} along={4:0.00} lateral={5:0.00} behind={6} | {7}",
+                    killerId, victimId, dist, bearing, along, lateral, along < 0f, strike),
+                LogLevel.WARNING);
+        }
+
+        // One line per tick the aim is frozen because the blade is out with nothing left to fight.
+        public static void LogBladeHold(int playerId, float actual, float wanted, string reason)
+        {
+            Logger.Log(
+                $"MeleeHold[{playerId}] actual={actual:0.#} wanted={wanted:0.#} " +
+                $"held={Mathf.DeltaAngle(actual, wanted):0.#} reason={reason}",
+                LogLevel.INFO);
+        }
 
         // Returns the new on/off state.
         public static bool Toggle(int playerId)
@@ -32,7 +105,10 @@ namespace MDS.Systems
             if (on)
             {
                 if (_probed.Add(playerId))
+                {
+                    // The weapon's real strike properties need Assembly-CSharp; run MeleeLogger alongside for those.
                     Logger.Log($"MeleeProbe: probing player {playerId} - perform attacks/blocks/feints and read this log.", LogLevel.INFO);
+                }
             }
             else if (_probed.Remove(playerId))
             {
@@ -42,8 +118,8 @@ namespace MDS.Systems
             }
         }
 
-        // Called for every player's packet; logs only probed players, only on an action-set change.
-        public static void OnPacket(int playerId, PlayerActions[] actions, float? rotationY, float? yaw)
+        // Called for every player's packet; logs only probed players, and only on an action-set change.
+        public static void OnPacket(int playerId, PlayerActions[] actions, float? rotationY, float? pitch, float? yaw)
         {
             if (_probed.Count == 0 || !_probed.Contains(playerId)) return;
 
@@ -55,7 +131,7 @@ namespace MDS.Systems
             _lastActions[playerId] = current;
             _lastChangeTime[playerId] = now;
 
-            Logger.Log($"MeleeProbe[{playerId}] t={now:F2} (+{delta:F2}s) actions=[{current}] rotY={Fmt(rotationY)} yaw={Fmt(yaw)}", LogLevel.INFO);
+            Logger.Log($"MeleeProbe[{playerId}] t={now:F2} (+{delta:F2}s) actions=[{current}] rotY={Fmt(rotationY)} pitch={FmtFine(pitch)} yaw={Fmt(yaw)}", LogLevel.INFO);
         }
 
         // Called for every hurt event; logs when a probed player takes damage, to measure hit timing and blocks.
@@ -75,5 +151,9 @@ namespace MDS.Systems
         }
 
         private static string Fmt(float? v) => v.HasValue ? v.Value.ToString("F0") : "-";
+
+        // Pitch needs decimals where the headings do not: the whole useful range of the game's chunk key is
+        // about -1.5 to 2, so rounding to whole numbers would throw the measurement away.
+        private static string FmtFine(float? v) => v.HasValue ? v.Value.ToString("F3") : "-";
     }
 }

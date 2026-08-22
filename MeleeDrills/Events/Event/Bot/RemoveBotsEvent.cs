@@ -3,9 +3,7 @@ using MDS.Systems;
 
 namespace MDS.Events
 {
-    // Removes all tracked bots matching a target token. 'all' also cancels pending (not-yet-joined) spawns.
-    // Target: <playerId> | all | attacking | defending | <faction name>
-    // Parameters: (string target)
+    // Removes all tracked bots matching a target token.
     public class RemoveBotsEvent : IEvent
     {
         public EventEnum EventName => EventEnum.RemoveBots;

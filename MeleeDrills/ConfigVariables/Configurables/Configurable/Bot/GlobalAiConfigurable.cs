@@ -4,18 +4,7 @@ using MDS.Systems;
 
 namespace MDS.ConfigVariables
 {
-    // Global default values for bot-AI levers, set with 'rc set globalAI <AiType> <lever> <value>' and read with
-    // 'rc get globalAI <AiType> <lever>'. A configurable AI reads a lever's default from here when it is created,
-    // falling back to its own built-in value; per-bot overrides are the separate 'rc bot cfg' path.
-    //
-    // One class holds every lever's default in a dict keyed by AiType and lever, rather than an IConfigurable per
-    // lever. Values are strings, parsed by each AI, so a lever's type lives with the AI, not here; a bad default
-    // just fails to parse and the AI uses its built-in fallback. Changing a default affects newly created AIs, not
-    // bots already spawned.
-    //
-    // The dict is seeded at construction with each configurable AI's built-in lever values, so 'rc get globalAI'
-    // reports the value actually in effect rather than "not set". Statics reset per map, so this re-seeds every
-    // map load, and the config file (SetGlobalAi) then re-applies any overrides.
+    // Global default values for bot-AI levers, set with 'rc set globalAI'. New bots of that AI start from them.
     public class GlobalAiConfigurable : IConfigurable
     {
         public ConfigurableEnum ConfigurableName => ConfigurableEnum.GlobalAi;

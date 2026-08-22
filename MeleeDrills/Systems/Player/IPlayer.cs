@@ -18,5 +18,6 @@ namespace MDS.Systems
 
         void AssignSpawnDetails(int spawnSectionId, FactionCountry faction, PlayerClass playerClass, int uniformId, GameObject playerObject);
         void MarkDead(); // clear IsAlive on death (StateTracker.OnPlayerDied)
+        void MarkAlive(); // restore IsAlive when a reported death turns out not to have been one (StateTracker.OnPlayerSurvived)
     }
 }

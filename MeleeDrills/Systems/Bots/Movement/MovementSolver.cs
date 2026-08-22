@@ -2,18 +2,10 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // Pure movement math, no engine I/O, so it stays unit-testable. It turns world-space movement goals into the
-    // bot's local input channels using its live heading, because the input axis is always interpreted in the
-    // bot's current facing (strafing left while facing North moves West; turn the body and that same strafe
-    // points elsewhere). Callers re-solve every tick against a fresh pose.
-    //
-    // Vectors are world XZ packed as (x = world X, y = world Z); heading is degrees from North (clockwise).
+    // Pure movement maths with no engine I/O, so it stays unit-testable.
     public static class MovementSolver
     {
-        // Expresses a unit world direction in the bot's local frame, scaled by throttle. The result is the
-        // (sideways, forwards) pair SetInputAxis wants: forwards along the bot's facing, sideways to its right.
-        // Because rotation preserves length, |result| equals throttle, so throttle is the speed fraction, which
-        // the engine scales to the active walk or run top speed.
+        // Expresses a unit world direction in the bot's local frame.
         public static Vector2 ToLocalAxis(BotPose pose, Vector2 worldDir, float throttle)
         {
             throttle = Mathf.Clamp01(throttle);

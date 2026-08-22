@@ -4,19 +4,10 @@ using HoldfastSharedMethods;
 
 namespace MDS.Systems
 {
-    // Turns the edge-triggered melee PlayerActions in each player's packets into a durable, queryable melee
-    // state, so a bot can react to an enemy's attack. Fed from OnPlayerPacket, like MeleeProbe and CharacterTracker.
-    //
-    // Vocabulary, confirmed by the probe: a primary attack winds up as MeleeStrike{High|Low} (direction in the
-    // token) and commits with ExecuteMeleeWeaponStrike; a block is MeleeBlock{High|Low|Left|Right}. A block that
-    // appears during a windup is a feint or cancel; there is always a block between two attack holds.
+    // Turns the edge-triggered melee PlayerActions in each packet into a per-player melee state.
     public static class CombatTracker
     {
-        // How long after a commit to keep the block up. The stab's lethal phase has real duration and the tip can
-        // connect anywhere in it: point-blank it lands early, about 0.3s, but at melee range, or when the attacker
-        // stabs wide and turns the tip into the defender, contact lands late (0.76s was seen killing the bot
-        // through a 0.55s hold). So we block through the whole window. Raising this costs nothing while defending:
-        // a fresh windup in a new direction still re-aims the block immediately.
+        // How long after a commit to keep the block up, covering the stab's lethal window.
         public const float LethalWindowSeconds = 1.0f;
 
         public struct MeleeState
@@ -32,9 +23,7 @@ namespace MDS.Systems
 
         private static readonly Dictionary<int, MeleeState> _states = new();
 
-        // Realtime of each player's most recent successful block, as the defender. OnPlayerBlock fires the instant
-        // a block absorbs a hit, so this is a precise "the swing is spent, you're clear to counter" signal, better
-        // than timing the lethal window blind.
+        // Realtime of each player's most recent successful block.
         private static readonly Dictionary<int, float> _lastBlock = new();
 
         // Who each defender most recently blocked, the attacker of their last absorbed hit. Lets a bot engage the
@@ -92,9 +81,7 @@ namespace MDS.Systems
         // The attacker of playerId's last absorbed hit (as defender), or null if none seen.
         public static int? LastBlockAttacker(int playerId) => _lastBlockAttacker.TryGetValue(playerId, out int a) ? a : (int?)null;
 
-        // Drops one player's melee state, called when they leave. The game recycles player ids, so a replacement
-        // bot can be handed the id of the bot it replaced; without this it would inherit that bot's windup and
-        // block history and act on it immediately, for instance countering or engaging a player it never fought.
+        // Drops one player's melee state, called when they leave.
         public static void Clear(int playerId)
         {
             _states.Remove(playerId);

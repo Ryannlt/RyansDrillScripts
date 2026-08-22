@@ -4,11 +4,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc summonLineAt <playerId> [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // Forms a shoulder-to-shoulder line of bots centred on another player, facing the way they face. This is the
-    // route that works from free roam, where the server never learns the caller's own position. Faction and class
-    // default to the TARGET player's rather than the caller's. Everything after the id follows the same grammar as
-    // 'rc summonLine'. All replies, including failures, go to the caller, not the target.
+    // rc summonLineAt <playerId> [count] [spec...] - a line summoned onto another player.
     public class SummonLineAtCommand : IConsoleCommand
     {
         public ConsoleCommandEnum CommandName => ConsoleCommandEnum.SummonLineAt;

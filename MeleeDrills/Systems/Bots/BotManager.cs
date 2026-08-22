@@ -5,10 +5,7 @@ using UnityEngine;
 using MDS.ConfigVariables;
 using MDS.Core;
 
-// Central bot subsystem: spawns and tracks bots, assigns AI and death policy, and runs a single tick
-// coroutine that lives only while at least one bot is active. Bots are dropped each new round (mirroring
-// StateTracker) and auto-clear on map change via assembly reload. Lifecycle hooks are called by StateTracker.
-// The command layer resolves caller context; this layer takes explicit data only.
+// Central bot subsystem: spawns, tracks, assigns AI and death policy, and runs the one tick coroutine.
 
 namespace MDS.Systems
 {
@@ -16,10 +13,7 @@ namespace MDS.Systems
     {
         private const float TickInterval = 0.05f;                 // 20 Hz - tunable
         private const float GhostTimeoutSeconds = 5f;             // drop bots that joined but never spawned
-        // Give up on a spawn request the game never delivered a bot for. Joining bots are paired with requests in
-        // arrival order, so a request that never lands would otherwise sit at the front of the queue and hand the
-        // next bot to join the wrong placement, spec and AI. Bots normally join within a second, and a ten-bot
-        // formation under a full server took about five, so this is well clear of legitimate latency.
+        // Give up on a spawn the game never delivered, or it hands the next joining bot the wrong placement.
         private const float PendingSpawnTimeoutSeconds = 15f;
 
         // Defaults + timings read live from configurables (settable via rc set / map config variables).
@@ -36,17 +30,16 @@ namespace MDS.Systems
         private static readonly Queue<PendingBotSpawn> _pending = new();
         private static Coroutine _tickRoutine;
 
-        // Bumped whenever tracking is torn down (new round, remove all). Delayed work runs on the
-        // DontDestroyOnLoad coroutine runner, so it outlives a map change; anything scheduled in an earlier
-        // generation must not spawn into the current one. A stale replacement would enqueue a pending entry
-        // holding the previous round's AI and placement, and since joining bots are paired with pending entries
-        // in arrival order, that one stale entry shifts every assignment after it.
+        // Bumped whenever tracking is torn down, so delayed work from an earlier round cannot spawn into this one.
         private static int _generation;
 
         // How long a held replacement will wait for its group's bout to finish, and how often it checks. The cap
         // matters: a drill nobody ever finishes would otherwise swallow the bot permanently.
         private const float ReplacementHoldTimeout = 120f;
         private const float ReplacementHoldPoll = 0.5f;
+
+        // Bots whose death was a casualty of their own group's bout. Only these hold their replacement back.
+        private static readonly HashSet<int> _boutCasualties = new();
 
         // Handed out one per spawn batch, so bots summoned together can be recognised as a formation later. Never
         // reused within a session, so a stale id can't quietly adopt a bot into a group it was never part of.
@@ -59,12 +52,7 @@ namespace MDS.Systems
 
         // Command surface.
 
-        // spec null means a fully random spawn (carbonPlayers spawn). placement positions and faces each bot on spawn.
-        // predecessor is supplied only by the Replace path, so the replacement can resume the dead bot's
-        // standing order (see IBotAi.InheritFrom); every other caller leaves it null.
-        // guardTargetId is set by the summon commands so a guardian AI escorts the player it was summoned onto.
-        // groupId 0 means "this is a new batch", so every ordinary summon forms its own group; the Replace path
-        // passes the dead bot's id instead, so a replacement rejoins the station it came from.
+        // spec null means a fully random spawn. Requests are queued and paired with joins in arrival order.
         public static void SpawnBots(int count, BotSpawnSpec spec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor = null, int? guardTargetId = null, int groupId = 0)
         {
             float requestedAt = Time.realtimeSinceStartup;
@@ -156,9 +144,7 @@ namespace MDS.Systems
             // Clear out expired requests first: this bot must never be paired with one from minutes ago.
             PrunePendingSpawns();
 
-            // Joining bots are paired with spawn requests in arrival order, since the join callback carries no
-            // link back to the request. A bot with no pending request is therefore unexpected (something spawned
-            // it outside the mod, or the queue desynced) and it falls back to the configured defaults.
+            // Joining bots are paired with spawn requests in arrival order.
             if (_pending.Count == 0)
                 Logger.Log($"Bot {bot.PlayerId} joined with no pending spawn request; using defaults (AI {DefaultAi}).", LogLevel.WARNING);
 
@@ -206,9 +192,7 @@ namespace MDS.Systems
             IBotAi predecessorAi = controller.Ai;   // Replace: lets the replacement resume its standing order
             int groupId = controller.GroupId;       // Replace: keeps the replacement in its formation
 
-            // Whether the replacement should wait out the bout instead of walking straight back into it. Without
-            // this a 3v1 is briefly a 2v1 and then a 3v1 again, so the shorthanded fight the drill is about never
-            // actually happens.
+            // Whether the replacement is allowed to wait out the bout; whether it does is decided once the killer is known.
             bool holdReplacement = groupId != 0 && controller.Ai is MeleeAi melee && melee.HoldReplacement;
 
             switch (policy)
@@ -243,15 +227,38 @@ namespace MDS.Systems
             }
         }
 
-        // A player killed someone. Only interesting when the victim was one of our bots in a formation: a stab
-        // clean enough to kill before the guard rises never registers as a block, so without this the rest of a
-        // drill station would go on waiting while its partner was cut down in front of it.
+        // A player killed someone. Only interesting when the victim was one of our bots in a formation.
         public static void OnPlayerKilled(int killerPlayerId, int victimPlayerId)
         {
             var victim = _bots.FirstOrDefault(b => b.PlayerId == victimPlayerId);
             if (victim == null) return;
 
+            // A bot killing a bot of its own faction is the friendly-fire case. Unknown factions count as a match.
+            var killer = _bots.FirstOrDefault(b => b.PlayerId == killerPlayerId);
+            bool sameSide = killer != null
+                && (killer.Bot.Faction == null || victim.Bot.Faction == null
+                    || killer.Bot.Faction == victim.Bot.Faction);
+
+            if (sameSide && killer.Position is Vector3 kp && victim.Position is Vector3 vp && killer.Heading is float kh)
+                MeleeProbe.LogFriendlyFire(killerPlayerId, victimPlayerId,
+                    new Vector2(kp.x, kp.z), kh, new Vector2(vp.x, vp.z));
+
             SquadCoordinator.OnMemberKilled(victim.GroupId, victimPlayerId, killerPlayerId);
+
+            // Only a death at the hands of the bout's own opponent holds a replacement back.
+            if (SquadCoordinator.IsBoutOpponent(victim.GroupId, killerPlayerId))
+                _boutCasualties.Add(victimPlayerId);
+        }
+
+        // A player respawned, so anyone fighting them was fighting a body that no longer exists.
+        public static void OnTargetRespawned(int playerId)
+        {
+            SquadCoordinator.OnTargetRespawned(playerId);
+
+            // The coordinator covers formations; a bot with squad and post both off is not in one.
+            for (int i = 0; i < _bots.Count; i++)
+                if (_bots[i].Ai is ISquadMember member && member.ProvokedBy == playerId)
+                    member.StandDown();
         }
 
         public static void OnBotDisconnected(int playerId)
@@ -265,6 +272,7 @@ namespace MDS.Systems
             _generation++;
             _bots.Clear();
             _pending.Clear();
+            _boutCasualties.Clear();
             CharacterTracker.Reset();
             MeleeProbe.Reset();
             CombatTracker.Reset();
@@ -275,11 +283,22 @@ namespace MDS.Systems
 
         // Internals.
 
-        // Drops spawn requests the game never delivered a bot for. A request can go unanswered when the spawn is
-        // refused (the carbon-bot limit) or the join is aborted, and since bots are paired with requests in
-        // arrival order, a leftover would be handed to the next bot to join, giving it the wrong placement, spec
-        // and AI for the rest of the round. Requests are enqueued in time order, so expired ones are always at
-        // the front.
+        // Drops spawn requests the game never delivered a bot for.
+        private static List<BotController> ShuffledBots()
+        {
+            List<BotController> order = _bots.ToList();
+
+            for (int i = order.Count - 1; i > 0; i--)
+            {
+                int j = Random.Range(0, i + 1);
+                BotController swap = order[i];
+                order[i] = order[j];
+                order[j] = swap;
+            }
+
+            return order;
+        }
+
         private static void PrunePendingSpawns()
         {
             float now = Time.realtimeSinceStartup;
@@ -298,9 +317,7 @@ namespace MDS.Systems
             int removed = _bots.RemoveAll(b => b.PlayerId == playerId);
             if (removed == 0) return;
 
-            // That may have been the group's last member. Say so now rather than leaving it to the tick loop,
-            // which is about to stop if this was the last bot on the server - and a group left frozen mid-bout
-            // makes its own replacements queue up behind each other. See SquadCoordinator.OnGroupEmptied.
+            // That may have been the group's last member.
             if (groupId != 0 && _bots.All(b => b.GroupId != groupId))
                 SquadCoordinator.OnGroupEmptied(groupId);
 
@@ -308,9 +325,7 @@ namespace MDS.Systems
             if (_bots.Count == 0) StopTicking();
         }
 
-        // A death-triggered kick is delayed so the game can credit the killer and play the death before
-        // the bot is removed (an immediate kick makes the bot vanish without crediting the kill).
-        // A non-null replacementSpec (+ position) spawns a replacement once the kick fires (Replace).
+        // The kick is delayed so the game can credit the killer and play the death out first.
         private static void ScheduleDeathKick(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor = null, int groupId = 0, bool holdReplacement = false)
         {
             if (!UnityEngine.Application.isPlaying)
@@ -326,9 +341,7 @@ namespace MDS.Systems
 
         private static IEnumerator DeathKickRoutine(int playerId, BotSpawnSpec replacementSpec, BotAiEnum ai, BotDeathPolicy death, BotPlacement? placement, IBotAi predecessor, int groupId, bool holdReplacement)
         {
-            // This runs on the DontDestroyOnLoad runner, so it keeps going across a map change. If the round
-            // turned over while we waited, the bot and its slot are already gone and the replacement would spawn
-            // into the new round carrying the old round's AI and placement, so drop the rest of the routine.
+            // Runs on the DontDestroyOnLoad runner, so it survives a map change; drop it if the round turned over.
             int generation = _generation;
 
             // 1) Wait so the killer is credited and the death plays out before the bot is removed.
@@ -341,10 +354,12 @@ namespace MDS.Systems
             yield return new WaitForSeconds(ReplaceDelaySeconds);
             if (generation != _generation) yield break;
 
-            // 3) Optionally sit out the rest of the bout, so the group actually fights shorthanded instead of
-            //    being topped back up mid-fight. Capped, because a bout that never ends - a drill left running
-            //    while everyone wanders off - must not delete the bot for good.
-            if (holdReplacement)
+            // Sit out the rest of the bout, but only for a bot the bout itself killed. Capped either way.
+            bool boutCasualty = _boutCasualties.Remove(playerId);
+            if (holdReplacement && !boutCasualty)
+                Logger.Log($"Bot {playerId} was not killed by its group's opponent; replacing without holding.", LogLevel.DEBUG);
+
+            if (holdReplacement && boutCasualty)
             {
                 float waitUntil = Time.realtimeSinceStartup + ReplacementHoldTimeout;
                 while (!GroupBetweenBouts(groupId) && Time.realtimeSinceStartup < waitUntil)
@@ -365,10 +380,7 @@ namespace MDS.Systems
             Logger.Log($"Bot {playerId} kicked; replacement (if any) in {ReplaceDelaySeconds}s.", LogLevel.DEBUG);
         }
 
-        // Whether a held replacement may appear yet. The live-member check has to happen here rather than in the
-        // coordinator: its own bookkeeping is rebuilt by the tick loop, and the tick loop stops once the last bot
-        // is gone, so a group wiped out entirely would look forever mid-fight and strand its replacements until
-        // the timeout. _bots is the authoritative list and is accurate whether or not anything is ticking.
+        // Whether a held replacement may appear yet. The live-member check has to happen here, not in the coordinator.
         private static bool GroupBetweenBouts(int groupId) =>
             _bots.All(b => b.GroupId != groupId) || SquadCoordinator.IsBoutOver(groupId);
 
@@ -378,10 +390,7 @@ namespace MDS.Systems
                 SpawnBots(1, replacementSpec, ai, death, placement, predecessor, groupId: groupId);
         }
 
-        // Builds the spec for a Replace replacement: keeps the intended faction/class, but fills in the bot's
-        // actual name/regtag/uniformId. The game assigns those randomly when unspecified, so reusing the real
-        // values makes the replacement match the bot it replaces. Returns null for random-spawned bots (which
-        // have no spec to replay).
+        // Builds the Replace spec: intended faction and class, but the bot's actual name, regtag and uniform.
         private static BotSpawnSpec BuildReplacementSpec(BotController controller)
         {
             var spec = controller.Spec;
@@ -414,10 +423,7 @@ namespace MDS.Systems
 
         private static IEnumerator TickLoop()
         {
-            // Like the other delayed work, this runs on the DontDestroyOnLoad runner. If a tick loop from an
-            // earlier generation is somehow still alive (a stale coroutine handle, or statics reset out from
-            // under it), it would drive the same bots alongside the current loop and the two sets of input
-            // commands fight each other, leaving bots crawling back and forth. Exit as soon as that's detected.
+            // Runs on the DontDestroyOnLoad runner like the other delayed work.
             int generation = _generation;
 
             while (_bots.Count > 0)
@@ -436,7 +442,8 @@ namespace MDS.Systems
                 // Lay out the squads before the bots decide, so each one reads a slot built from this tick.
                 SquadCoordinator.Refresh(_bots, TickInterval);
 
-                foreach (var bot in _bots.ToList())
+                // Shuffled, so bots deciding on the same tick do not always resolve in the same order.
+                foreach (var bot in ShuffledBots())
                 {
                     // Self-heal: a replacement that joined but never spawned (game rejected it, e.g. a
                     // carbon-bot limit) would otherwise stay tracked forever as a ghost.

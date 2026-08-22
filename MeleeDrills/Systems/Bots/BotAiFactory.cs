@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-// Creates bot AI instances by type. Mirrors the registry pattern, but since its job is construction
-// it's named as a factory. Returns fresh instances (not shared singletons) because an AI may hold
-// per-bot state (timers, etc). UMod disallows reflection, so AI types are registered manually.
+// Creates bot AI instances by type. Mirrors the registration list in BotAiEnum.
 
 namespace MDS.Systems
 {
@@ -24,6 +22,7 @@ namespace MDS.Systems
             Register(BotAiEnum.GroupEasy, () => new MeleeAi(BotAiEnum.GroupEasy));
             Register(BotAiEnum.GroupNormal, () => new MeleeAi(BotAiEnum.GroupNormal));
             Register(BotAiEnum.Group, () => new MeleeAi(BotAiEnum.Group));
+            Register(BotAiEnum.GroupHard, () => new MeleeAi(BotAiEnum.GroupHard));
             Register(BotAiEnum.Test, () => new MeleeAi(BotAiEnum.Test));
 
             Logger.Log($"Registered {_factories.Count} bot AI type(s).", LogLevel.INFO);

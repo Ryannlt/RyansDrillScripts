@@ -1,14 +1,7 @@
 using System.Collections.Generic;
 using MDS.ConfigVariables;
 
-// The lever half of MeleeAi: the tunable state, the per-preset defaults, and the IConfigurableAi plumbing that
-// reads and writes them. Split out because MeleeAi.cs is the interesting file - the per-tick decision - and this
-// is bookkeeping that grew to a third of its length. Presets are lever bundles, so nearly every behaviour added
-// to the AI lands here as well, and keeping the two apart stops that traffic from burying Decide().
-//
-// A partial class rather than a separate MeleeLevers type on purpose: the behaviour reads these fields on almost
-// every line, so extracting a type would mean rewriting all of that for an encapsulation boundary nothing else
-// would use. Nothing outside MeleeAi consumes the levers, and MeleeDummy has its own.
+// The lever half of MeleeAi: tunable state, per-preset defaults, and the IConfigurableAi plumbing.
 
 namespace MDS.Systems
 {
@@ -23,11 +16,7 @@ namespace MDS.Systems
         private float _riposteWindow;                  // how long the post-block counter stays available
         private float _blockReactionMin, _blockReactionMax;     // reaction beat between reading an attack and raising the guard (0 = instant)
 
-        // The same beat, but in every posture except fighting: waiting to be provoked, backing off to re-form, and
-        // withdrawing. In all three the bot has stopped swinging, and a bot that cannot defend itself while doing
-        // so is just free kills - a walk-up stab would end a 2v1 before it starts, and chasing a retreating bot
-        // would always pay. Defaults to instant so difficulty lives in the fight; raise it for a station that
-        // punishes a sloppy approach. Not randomised: jitter here only decides whether the drill happens at all.
+        // The block reaction beat used in every posture except fighting: waiting, backing off, withdrawing.
         private float _passiveBlockReaction;
 
         // Capability toggles (levers).
@@ -44,10 +33,7 @@ namespace MDS.Systems
         private bool _stickyTarget;   // keep the current target while valid (else re-pick the closest each tick)
         private float _passiveRange;  // engageOnAttack: hold distance while waiting (engaged uses defensiveRange)
 
-        // Guard levers (see the Guardian preset). A guarded player turns the bot into an escort: it holds station
-        // near them and only fights once something threatens them.
-        // The summon commands hand every bot a guard target, so this toggle is what decides whether the bot acts
-        // on it. Without it every summoned bot would escort whoever summoned it and refuse to fight them.
+        // Guard levers: an escort holds station by its ward and only fights what threatens them.
         private bool _guard;              // act as an escort for the guard target, rather than ignoring it
         private float _guardRange;        // an enemy this close to the guarded player pulls the bot into the fight
         private float _guardFollowRange;  // distance the bot holds from the guarded player while nothing is happening
@@ -57,24 +43,28 @@ namespace MDS.Systems
         // this bot a slot on the arc around the enemy and says whether its swing line is clear of squadmates.
         private bool _squad;
 
-        // Imperfection levers: each is the WORST the bot may be, not how bad it is. Every roll runs from zero up
-        // to the lever, so a bot can always come out correct by chance and a lower tier simply does so less
-        // often. A pair reliably half a metre too wide is a puzzle solved once and exploited forever; a pair
-        // usually too wide has to be read every time, and now and then punishes an assumption.
+        // Imperfection levers: each is the WORST the bot may be, rolled from zero every time.
         private float _slotError;         // furthest it may stand from its place on the ring, metres
         private float _formationLag;      // longest it may work from a stale slot, seconds
+        private float _stabSeparation;    // smallest gap between opposite stabs in one formation, seconds
 
-        // How often the formation fights as a unit rather than merely standing in one, 0 to 1. Rolled per swing
-        // and per counter: it decides whether the bot takes the direction the line assigned it and reads the
-        // shared guard, or fights its own fight. At 0 it never does, which is a duellist who has simply stopped
-        // crowding its neighbour; at 1 always, which is a drilled pair working someone over together.
-        //
-        // A chance rather than a switch because the middle is where the practice is. Half-coordinated bots
-        // mostly stab the same way and can be blown one at a time, then occasionally land a real opposite pair -
-        // which is what stops a player writing the tier off and swinging on autopilot.
+        // Mid-swing safety. Two radii because the gate costs stabs while the clamp costs only tracking.
+        private float _gateRadius;        // half-width used to refuse a stab outright, metres
+        private float _clampRadius;       // half-width used to stop turning mid-stab, metres
+        private float _bladeMargin;       // degrees of slack kept outside a mate's band rather than sitting on it
+        private float _mateConeFloor;     // narrowest the danger cone may ever get, degrees, whatever the geometry says
+        private float _mateCrowdRatio;    // a mate closer than this many spacings is in the way at any bearing, 0 = off
+        private bool _gateOnMate;         // hold fire while a mate stands in the blade's band
+        private bool _abortOnMate;        // block to cancel our own stab when the aim cannot be pulled clear
+
+        // Chance the bot takes the direction the line assigned rather than picking its own, 0 to 1.
         private float _coordinate;
 
-        private float _squadSpacing;      // gap between neighbouring members, the diameter of the pair's circle
+        // Vertical aim in the engine's own pitch scale, 0 level. Drives BladeBearing and BladeReach.
+        private float _aimPitch;
+
+        private float _squadSpacing;      // closest the line ever stands, the floor its breathing works up from
+        private float _squadSpacingVar;   // how much wider than that it may drift during a fight, 0 = a fixed gap
         private float _laneHalfWidth;     // how close a squadmate may be to the swing line before it is blocked
         private float _squadStandoff;     // range the formation's point holds from the enemy
 
@@ -82,7 +72,8 @@ namespace MDS.Systems
         // with anybody, which is what makes these useful on a plain duellist.
         private bool _post;               // wait at the post until provoked, and return to it afterwards
         private bool _breakoff;           // once provoked, re-establish range before throwing anything
-        private float _breakoffRange;     // range re-established when breaking off
+        private float _breakoffRange;     // furthest the group gives ground when breaking off, from where it was provoked
+        private float _engageDelay;       // seconds after the first provocation before the group may swing
         private float _resetRange;        // how far the target may get from the post before disengaging (0 = no limit)
         private int _minMembers;          // fewest members it will fight with; below this it breaks off and stays shut
         private bool _holdReplacement;    // a dead member's replacement waits for the bout to end before spawning
@@ -90,9 +81,7 @@ namespace MDS.Systems
 
         private int? _guardTargetId;      // the friendly being escorted, from the summon or the guardTarget lever
 
-        // Built-in lever defaults per preset: shared spacing values, then the toggles, targeting, and reaction
-        // beats that make each preset. GlobalAiConfigurable seeds the global defaults from this so 'rc get globalAI'
-        // reports them.
+        // Built-in lever defaults per preset. GlobalAiConfigurable seeds its globals from this.
         public static (string name, string value)[] DefaultLeversFor(BotAiEnum aiType)
         {
             var levers = new List<(string, string)>
@@ -110,10 +99,24 @@ namespace MDS.Systems
                 ("squad", "false"),       // fight as a formation with the rest of the spawn batch
                 ("coordinate", "0.5"),    // neutral: each bot picks its own swing, so updowns happen only by luck
                 ("slotError", "0"), ("formationLag", "0"), // perfect placement and perfect tracking by default
-                // 0.9 is the measured gap a player cannot jump between. laneHalfWidth is about a body width, so
-                // at this spacing a partner standing beside the bot does not count as blocking its line, which is
-                // the point: once the pair is set, both are meant to be able to stab.
-                ("squadSpacing", "0.9"), ("laneHalfWidth", "0.5"),
+                ("stabSeparation", "0"),  // no floor: a pair may throw opposite stabs on the same tick
+                // Effective envelopes rather than shoulder widths, fitted to observed kills at one spacing.
+                ("gateRadius", "0.3"), ("clampRadius", "0.4"), ("bladeMargin", "5"),
+
+                // Floor under the danger cone, because asin(radius/dist) collapses as the line widens. Clamp only.
+                ("mateConeFloor", "28"),
+
+                // A mate closer than this many spacings is in the way at any bearing ahead. Clamp only, 0 = off.
+                ("mateCrowdRatio", "1"),
+
+                // Hold fire while a mate stands in the blade's band, rather than stabbing and hoping.
+                ("gateOnMate", "true"),
+
+                // Still off. Blocking does not cancel reliably, so it stays a last resort behind its own lever.
+                ("abortOnMate", "false"),
+                // The line breathes between squadSpacing and squadSpacing+Variance; 0.85 is what it can hold moving.
+                ("aimPitch", "0"),   // level, and the only value known to mean the same to the command and the engine
+                ("squadSpacing", "0.85"), ("squadSpacingVariance", "0.7"), ("laneHalfWidth", "0.5"),
                 // The formation's point holds this range from the enemy, so a circling enemy leaves it alone while
                 // one that closes or withdraws tows it along.
                 ("squadStandoff", "1.5"),
@@ -122,108 +125,84 @@ namespace MDS.Systems
                 ("breakoff", "false"),      // and only some of those reset the distance before fighting
                 // resetRange 0 = no distance limit: a bout ends when it is won or lost, not when someone steps
                 // away from it. Tidying the arena afterwards is returnDelay's job, not this one's.
-                ("breakoffRange", "4"), ("resetRange", "0"),
+                ("breakoffRange", "2"), ("resetRange", "0"),
+                // Off outside the drill stations. The Group tiers set it below.
+                ("engageDelay", "0"),
                 ("minMembers", "0"),          // 0 = fight on however few are left
                 ("holdReplacement", "false"), // only a drill with a group size worth preserving holds one back
                 ("returnDelay", "30"),        // hold where the bout ended long enough to be used again straight away
             };
             switch (aiType)
             {
-                // Guardian: escorts the player it was summoned onto. It holds station beside them and stays out of
-                // it until an enemy comes within guardRange of them or they get into melee themselves, then it
-                // fights like a duellist with human reactions. It respects factions, since the whole point is to
-                // fight the other side, and keeps its distance from the other bots so a pile of guards is less
-                // likely to cut each other down.
+                // Guardian: escorts whoever summoned it, and fights only what comes within guardRange of them.
                 case BotAiEnum.Guardian:
                     levers.Add(("press", "true"));  levers.Add(("riposte", "true"));  levers.Add(("move", "true")); levers.Add(("pursue", "true"));
                     levers.Add(("targetRange", "0")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "false"));
                     levers.Add(("ignoreTeam", "false"));
                     levers.Add(("guard", "true"));
                     levers.Add(("separationRange", "1.5"));
-                    // Deliberately poor, a step below DuelingEasy. A guard is meant to buy its ward a moment and
-                    // be beatable by any competent player, not to win the duel, and a whole detail of them would
-                    // be miserable to fight otherwise. It reads attacks slowly enough that plenty get through.
+                    // Deliberately a step below DuelingEasy: a guard buys its ward a moment, it does not win the duel.
                     levers.Add(("blockReactionMin", "0.5")); levers.Add(("blockReactionMax", "0.8"));
                     levers.Add(("riposteReactionMin", "0.4")); levers.Add(("riposteReactionMax", "1.1"));
                     levers.Add(("attackReadBeat", "1.2")); break;
 
-                // Dueling family: passive (block only) until a player in range strikes it and it blocks the hit,
-                // then it locks that attacker and fights to the death before returning to passive. targetRange is
-                // the passive read/provoke range. Within a family the tiers share everything but the reaction
-                // beats, and the Group tiers are the Dueling tiers plus the formation and station levers.
-                // Test shares the Dueling lever set so whatever is being developed is measured against a known
-                // baseline, and carries the behaviour under construction on top. None of this is added to
-                // Guardian: it is in use on the linebattle server and is deliberately left alone.
+                // Dueling family: passive until a player's attack is blocked, then fights that attacker to the death.
                 case BotAiEnum.DuelingEasy:
                 case BotAiEnum.DuelingNormal:
                 case BotAiEnum.Dueling:
                 case BotAiEnum.GroupEasy:
                 case BotAiEnum.GroupNormal:
                 case BotAiEnum.Group:
+                case BotAiEnum.GroupHard:
                 case BotAiEnum.Test:
                     levers.Add(("press", "true"));  levers.Add(("riposte", "true"));  levers.Add(("move", "true")); levers.Add(("pursue", "true"));
                     levers.Add(("targetRange", "3")); levers.Add(("stickyTarget", "false")); levers.Add(("engageOnAttack", "true"));
 
-                    // Every preset in this family holds formation. Two duellists who converge on one player stop
-                    // crowding each other and stop swinging through each other, which is all squad buys on its
-                    // own - coordinate below is what turns a formation into a team. A bot fighting alone is
-                    // untouched either way, since a formation of one has no slot to hold.
-                    //
-                    // Separation goes with it, kept just under squadSpacing so it only resists bots overlapping
-                    // and does not fight the formation itself. Without it a bot repositioning behind its partner
-                    // walks into it, which is the same problem the formation exists to solve.
+                    // Every preset here holds formation. Separation sits just under squadSpacing so it only resists overlap.
                     levers.Add(("squad", "true")); levers.Add(("separationRange", "0.8"));
 
-                    // They all keep a post too: they wait on the mark they were put on, and after a bout they
-                    // hold where it ended long enough to be used again straight away (returnDelay) before walking
-                    // back. Without it a bot drifts to wherever its last fight finished and stays there, which
-                    // makes running the same drill repeatedly a matter of chasing it around.
+                    // And a post: wait on the mark it was set up on, and walk back to it after a bout.
                     levers.Add(("post", "true"));
 
-                    // Duel bots keep the neutral 0.5 from the shared defaults: each picks its own swing, so a
-                    // pair lands an updown only by luck. Throwing deliberately opposite is a Group trait, set per
-                    // tier just below - it must NOT come from the tier switch, which the duel family shares, or a
-                    // top-tier duel pair would quietly start drilling updowns at people.
+                    // Duel bots keep the neutral 0.5. Deliberate updowns are a Group trait, set per tier below.
                     if (aiType == BotAiEnum.Test) levers.Add(("coordinate", "1"));
 
-                    // Group family: a drill station. Bots summoned in one batch wait where they were set up,
-                    // and provoking any one of them wakes all of them onto whoever did it. They then back off to
-                    // breakoffRange and re-form before throwing anything, because the out-of-range fight for stab
-                    // priority is most of the skill and starting from the activation stab would skip it. When the
-                    // player dies or walks off they return to the post and re-arm for the next one.
-                    if (aiType == BotAiEnum.GroupEasy || aiType == BotAiEnum.GroupNormal || aiType == BotAiEnum.Group)
+                    // Group family: a drill station. Wakes as one, gives ground, fights, returns to post.
+                    if (aiType == BotAiEnum.GroupEasy || aiType == BotAiEnum.GroupNormal
+                        || aiType == BotAiEnum.Group || aiType == BotAiEnum.GroupHard)
                     {
                         levers.Add(("breakoff", "true"));
-                        // Stop one short of a duel: a 3v1 plays on as a 2v1 and only resets when the next death
-                        // would make it a 1v1, which is not what these were summoned for. Safe at any size because
-                        // the coordinator caps it by the batch's own strength, so a bot summoned alone still duels.
+
+                        // Give ground once, then stand and defend for a moment before either side commits.
+                        levers.Add(("engageDelay", "1.5"));
+                        // Stop one short of a duel: a 3v1 plays on as a 2v1 and resets before it would become a 1v1.
                         levers.Add(("minMembers", "2"));
 
-                        // A shorthanded bout stays shorthanded until it is over, which is what makes minMembers
-                        // mean anything. Only the Group family wants this: a duel bot has no group size worth
-                        // preserving, so its replacement should simply come back.
+                        // A shorthanded bout stays shorthanded until it is over, which is what makes minMembers mean anything.
                         levers.Add(("holdReplacement", "true"));
 
-                        // The updown axis, which is the Group family's real difficulty knob. The top tier always
-                        // throws opposite, which is unblockable and the reason a perfect pair cannot be beaten.
-                        // Normal sits at neutral, so a pair lands one only by luck, about half the time - which
-                        // is what a genuinely uncoordinated pair does. Easy goes below neutral and starts
-                        // deliberately matching, so updowns become rarer than chance and its stabs can be drawn
-                        // and blown one at a time.
+                        // The updown axis. For a pair P(opposite) is c^2+(1-c)^2, so the useful values crowd against 1.
                         levers.Add(("coordinate",
+                            aiType == BotAiEnum.GroupEasy ? "0.97" :
+                            aiType == BotAiEnum.GroupNormal ? "0.98" : "1"));
+
+                        // Floor under an updown: opposite stabs closer together than this cannot be blocked at all.
+                        levers.Add(("stabSeparation",
                             aiType == BotAiEnum.GroupEasy ? "0.3" :
-                            aiType == BotAiEnum.GroupNormal ? "0.5" : "1"));
+                            aiType == BotAiEnum.GroupNormal ? "0.25" :
+                            aiType == BotAiEnum.GroupHard ? "0.15" : "0"));
+
+                        // How much room the line gives itself to breathe. A narrower band is the harder one to fight.
+                        levers.Add(("squadSpacingVariance",
+                            aiType == BotAiEnum.GroupEasy ? "0.5" :
+                            aiType == BotAiEnum.GroupNormal ? "0.3" :
+                            aiType == BotAiEnum.GroupHard ? "0.1" : "0"));
                     }
 
                     switch (aiType)
                     {
-                        // Difficulty is two things: how fast a bot reacts, and how well it holds a formation. The
-                        // second matters more in a group - reactions alone would give a beatable pair that still
-                        // stands in a perfect line and stabs in perfect opposition, which has no answer. Note the
-                        // imperfection levers are ceilings, so an Easy bot still lines up correctly now and
-                        // again; the tier decides how often, not whether.
+                        // Difficulty is reaction speed plus how well a line is held. The imperfection levers are ceilings.
                         case BotAiEnum.DuelingEasy:   // sluggish, and holds a line badly
-                        case BotAiEnum.GroupEasy:
                             levers.Add(("blockReactionMin", "0.3")); levers.Add(("blockReactionMax", "0.5"));
                             levers.Add(("riposteReactionMin", "0.2")); levers.Add(("riposteReactionMax", "0.8"));
                             levers.Add(("attackReadBeat", "0.9"));
@@ -232,15 +211,37 @@ namespace MDS.Systems
                             levers.Add(("slotError", "0.9")); levers.Add(("formationLag", "1.2")); break;
 
                         case BotAiEnum.DuelingNormal: // human reactions, and human sloppiness
-                        case BotAiEnum.GroupNormal:
                             levers.Add(("blockReactionMin", "0.1")); levers.Add(("blockReactionMax", "0.2"));
                             levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0.5"));
                             levers.Add(("attackReadBeat", "0.6"));
-                            // What Easy used to be, which turned out to be the honest middle: loose enough to be
-                            // split, but not so loose that the gap is simply there for the taking.
                             levers.Add(("slotError", "0.5")); levers.Add(("formationLag", "0.6")); break;
 
-                        default:                      // Dueling, Group and Test: how it is supposed to be done
+                        // GroupEasy is what GroupNormal was when it measured well in play, moved down a tier whole.
+                        case BotAiEnum.GroupEasy:
+                            levers.Add(("blockReactionMin", "0.1")); levers.Add(("blockReactionMax", "0.2"));
+                            levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0.5"));
+                            // Enough of a beat to break the metronome. MissedStabDuration already holds the bot for 1.5s.
+                            levers.Add(("attackReadBeat", "0.1"));
+                            levers.Add(("slotError", "0.5")); levers.Add(("formationLag", "0.2")); break;
+
+                        case BotAiEnum.GroupNormal:
+                            levers.Add(("blockReactionMin", "0.1")); levers.Add(("blockReactionMax", "0.2"));
+                            levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0.5"));
+                            // Wider than Easy's, deliberately: the harder tier is the one whose rhythm you
+                            // cannot settle into. Easy is more predictable here and slower everywhere else.
+                            levers.Add(("attackReadBeat", "0.3"));
+                            // Same misplacement as Easy, but answered instantly.
+                            levers.Add(("slotError", "0.5")); levers.Add(("formationLag", "0")); break;
+
+                        // GroupHard is Group with the edges off: same reads, blockable updowns, a fractionally late counter.
+                        case BotAiEnum.GroupHard:
+                            levers.Add(("blockReactionMin", "0")); levers.Add(("blockReactionMax", "0"));
+                            levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0.1"));
+                            levers.Add(("attackReadBeat", "0.3"));
+                            // Just off perfect, so the pair is not in identical relative positions every bout.
+                            levers.Add(("slotError", "0.1")); levers.Add(("formationLag", "0")); break;
+
+                        default:                      // Dueling, Group and Test: how it is supposed to be done.
                             levers.Add(("blockReactionMin", "0")); levers.Add(("blockReactionMax", "0"));
                             levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0"));
                             levers.Add(("attackReadBeat", "0.3"));
@@ -257,9 +258,7 @@ namespace MDS.Systems
             return levers.ToArray();
         }
 
-        // Applies the preset's defaults, each overridden by a global default if one is set. Called from the
-        // constructor; TrySet does the typed parse, and the advisory it can return is discarded because gate
-        // state is meaningless while the levers are still being seeded.
+        // Applies the preset's defaults, each overridden by a global default if one is set.
         private void SeedLevers(BotAiEnum aiType)
         {
             foreach (var (name, def) in DefaultLeversFor(aiType))
@@ -275,15 +274,14 @@ namespace MDS.Systems
             "targetRange", "ignoreTeam", "ignoreBots", "stickyTarget", "engageOnAttack",
             "passiveRange", "passiveBlockReaction",
             "guard", "guardTarget", "guardRange", "guardFollowRange", "separationRange",
-            "squad", "coordinate", "slotError", "formationLag",
-            "squadSpacing", "laneHalfWidth", "squadStandoff",
-            "post", "breakoff", "breakoffRange", "resetRange",
+            "squad", "coordinate", "slotError", "formationLag", "stabSeparation",
+            "gateRadius", "clampRadius", "bladeMargin", "mateConeFloor", "mateCrowdRatio", "gateOnMate", "abortOnMate",
+            "aimPitch", "squadSpacing", "squadSpacingVariance", "laneHalfWidth", "squadStandoff",
+            "post", "breakoff", "breakoffRange", "engageDelay", "resetRange",
             "minMembers", "holdReplacement", "returnDelay"
         };
 
-        // Levers that do nothing unless another lever is on. Setting one whose gate is off is NOT an error - the
-        // order you type commands in should not matter - but it silently has no effect, which is exactly how
-        // 'post' on a RiposteDummy went unnoticed. One parent each; chains resolve by walking up.
+        // Levers that do nothing unless another lever is on. Setting a dormant one is allowed, not an error.
         private static readonly Dictionary<string, string> LeverGates = new()
         {
             { "offensiverange", "move" }, { "offensiverangevariance", "move" },
@@ -296,8 +294,14 @@ namespace MDS.Systems
             { "passiverange", "engageonattack" },
             { "guardtarget", "guard" }, { "guardrange", "guard" }, { "guardfollowrange", "guard" },
             { "coordinate", "squad" }, { "sloterror", "squad" }, { "formationlag", "squad" },
-            { "squadspacing", "squad" }, { "lanehalfwidth", "squad" }, { "squadstandoff", "squad" },
+            { "stabseparation", "squad" },
+            // gateRadius, clampRadius and abortOnMate are ungated: the clamp runs on any bot with a live swing.
+            { "squadspacing", "squad" }, { "squadspacingvariance", "squad" },
+            { "lanehalfwidth", "squad" }, { "squadstandoff", "squad" },
             { "breakoff", "post" }, { "breakoffrange", "breakoff" }, { "resetrange", "post" },
+            // engageDelay is deliberately NOT gated on breakoff. It is a separate layer on the same wake: a
+            // station told to fight from where the blow landed can still be told to wait a beat before it does.
+            { "engagedelay", "post" },
             { "minmembers", "post" }, { "holdreplacement", "post" }, { "returndelay", "post" },
         };
 
@@ -318,10 +322,7 @@ namespace MDS.Systems
             }
         }
 
-        // The switched-off lever that is stopping this one from doing anything, or null when it is live.
-        // Reports the NEAREST closed gate, walking past any that are already on, because the direct dependency is
-        // the actionable next step: with post and breakoff both off, breakoffRange says 'breakoff', and once
-        // breakoff is on it says 'post'. Naming the root straight away would be advice you cannot act on yet.
+        // The nearest switched-off gate stopping this lever from doing anything, or null when it is live.
         private string BlockingGate(string lever)
         {
             string gate = LeverGates.TryGetValue(lever, out string g) ? g : null;
@@ -383,12 +384,23 @@ namespace MDS.Systems
                 case "coordinate":       return SetFraction(value, v => _coordinate = v, "coordinate", ref error);
                 case "sloterror":        return SetFloat(value, 0f, v => _slotError = v, "slotError", ref error);
                 case "formationlag":     return SetFloat(value, 0f, v => _formationLag = v, "formationLag", ref error);
+                case "stabseparation":   return SetFloat(value, 0f, v => _stabSeparation = v, "stabSeparation", ref error);
+                case "gateradius":       return SetFloat(value, 0f, v => _gateRadius = v, "gateRadius", ref error);
+                case "clampradius":      return SetFloat(value, 0f, v => _clampRadius = v, "clampRadius", ref error);
+                case "blademargin":      return SetFloat(value, 0f, v => _bladeMargin = v, "bladeMargin", ref error);
+                case "mateconefloor":    return SetFloat(value, 0f, v => _mateConeFloor = v, "mateConeFloor", ref error);
+                case "matecrowdratio":   return SetFloat(value, 0f, v => _mateCrowdRatio = v, "mateCrowdRatio", ref error);
+                case "gateonmate":       return SetBool(value, v => _gateOnMate = v, "gateOnMate", ref error);
+                case "abortonmate":      return SetBool(value, v => _abortOnMate = v, "abortOnMate", ref error);
+                case "aimpitch":         return SetFloat(value, float.MinValue, v => { _aimPitch = v; RefreshBladeGeometry(); }, "aimPitch", ref error);
                 case "squadspacing":     return SetFloat(value, 0f, v => _squadSpacing = v, "squadSpacing", ref error);
+                case "squadspacingvariance": return SetFloat(value, 0f, v => _squadSpacingVar = v, "squadSpacingVariance", ref error);
                 case "lanehalfwidth":    return SetFloat(value, 0f, v => _laneHalfWidth = v, "laneHalfWidth", ref error);
                 case "squadstandoff":    return SetFloat(value, 0f, v => _squadStandoff = v, "squadStandoff", ref error);
                 case "post":             return SetBool(value, v => _post = v, "post", ref error);
                 case "breakoff":         return SetBool(value, v => _breakoff = v, "breakoff", ref error);
                 case "breakoffrange":    return SetFloat(value, 0f, v => _breakoffRange = v, "breakoffRange", ref error);
+                case "engagedelay":      return SetFloat(value, 0f, v => _engageDelay = v, "engageDelay", ref error);
                 case "resetrange":       return SetFloat(value, 0f, v => _resetRange = v, "resetRange", ref error); // 0 = no limit
                 case "minmembers":       return SetInt(value, 0, v => _minMembers = v, "minMembers", ref error);
                 case "holdreplacement":  return SetBool(value, v => _holdReplacement = v, "holdReplacement", ref error);
@@ -449,21 +461,30 @@ namespace MDS.Systems
             yield return ("coordinate", _coordinate.ToString("0.##"));
             yield return ("slotError", _slotError.ToString("0.##"));
             yield return ("formationLag", _formationLag.ToString("0.##"));
+            yield return ("stabSeparation", _stabSeparation.ToString("0.##"));
+            yield return ("gateRadius", _gateRadius.ToString("0.##"));
+            yield return ("clampRadius", _clampRadius.ToString("0.##"));
+            yield return ("bladeMargin", _bladeMargin.ToString("0.#"));
+            yield return ("mateConeFloor", _mateConeFloor.ToString("0.#"));
+            yield return ("mateCrowdRatio", _mateCrowdRatio.ToString("0.##"));
+            yield return ("gateOnMate", _gateOnMate ? "true" : "false");
+            yield return ("abortOnMate", _abortOnMate ? "true" : "false");
+            yield return ("aimPitch", _aimPitch.ToString("0.###"));
             yield return ("squadSpacing", _squadSpacing.ToString("0.##"));
+            yield return ("squadSpacingVariance", _squadSpacingVar.ToString("0.##"));
             yield return ("laneHalfWidth", _laneHalfWidth.ToString("0.##"));
             yield return ("squadStandoff", _squadStandoff.ToString("0.##"));
             yield return ("post", _post ? "true" : "false");
             yield return ("breakoff", _breakoff ? "true" : "false");
             yield return ("breakoffRange", _breakoffRange.ToString("0.##"));
+            yield return ("engageDelay", _engageDelay.ToString("0.##"));
             yield return ("resetRange", _resetRange.ToString("0.##"));
             yield return ("minMembers", _minMembers.ToString());
             yield return ("holdReplacement", _holdReplacement ? "true" : "false");
             yield return ("returnDelay", _returnDelay.ToString("0.##"));
         }
 
-        // Copies every lever to a Replace replacement, so a bot tuned with 'rc bot cfg' isn't reset to preset
-        // defaults on death. Levers only: runtime state stays with the bot that earned it, which is why a
-        // replacement starts passive rather than resuming a fight it never had (see InheritFrom).
+        // Copies levers to a Replace replacement. Levers only: runtime state stays with the bot that earned it.
         private void CopyLeversFrom(MeleeAi p)
         {
             _offensiveBase = p._offensiveBase; _offensiveVar = p._offensiveVar;
@@ -479,9 +500,15 @@ namespace MDS.Systems
             _guard = p._guard; _guardRange = p._guardRange; _guardFollowRange = p._guardFollowRange; _separationRange = p._separationRange;
             _squad = p._squad; _coordinate = p._coordinate;
             _slotError = p._slotError; _formationLag = p._formationLag;
-            _squadSpacing = p._squadSpacing; _laneHalfWidth = p._laneHalfWidth;
+            _stabSeparation = p._stabSeparation;
+            _gateRadius = p._gateRadius; _clampRadius = p._clampRadius;
+            _bladeMargin = p._bladeMargin; _mateConeFloor = p._mateConeFloor; _mateCrowdRatio = p._mateCrowdRatio;
+            _gateOnMate = p._gateOnMate; _abortOnMate = p._abortOnMate;
+            _aimPitch = p._aimPitch; RefreshBladeGeometry();
+            _squadSpacing = p._squadSpacing; _squadSpacingVar = p._squadSpacingVar; _laneHalfWidth = p._laneHalfWidth;
             _squadStandoff = p._squadStandoff;
-            _post = p._post; _breakoff = p._breakoff; _breakoffRange = p._breakoffRange; _resetRange = p._resetRange;
+            _post = p._post; _breakoff = p._breakoff; _breakoffRange = p._breakoffRange; _engageDelay = p._engageDelay;
+            _resetRange = p._resetRange;
             _minMembers = p._minMembers; _holdReplacement = p._holdReplacement; _returnDelay = p._returnDelay;
             _engageOnAttack = p._engageOnAttack;
             _guardTargetId = p._guardTargetId;   // a replacement guard keeps escorting the same player

@@ -2,10 +2,7 @@ using MDS.Systems;
 
 namespace MDS.Events
 {
-    // Rotates all bots matching a target to face a heading (degrees from North).
-    // For command and one-shot use. Per-tick rotation should instead go through BotIntent.LookHeading and
-    // CarbonPlayerCommands.SetInputRotation, which avoids the per-call boxing of event dispatch.
-    // Parameters: (string target, float heading)
+    // Rotates all bots matching a target to face a heading.
     public class RotateBotsEvent : IEvent
     {
         public EventEnum EventName => EventEnum.RotateBots;

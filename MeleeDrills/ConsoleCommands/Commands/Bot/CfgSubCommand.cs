@@ -4,12 +4,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc bot cfg <target> [<lever> <value>]
-    //   with a lever and value: set one behaviour lever on the matching bots (only those whose AI is configurable).
-    //   without: list the matching bots' current levers and values.
-    // <target> is a playerId, all, attacking, defending, or a faction name. This is a per-bot override; a lever's
-    // default comes from 'rc set globalAI'. It mirrors the 'move' flow: resolve the target with BotTargetSelector,
-    // apply to each fitting bot, and skip the rest.
+    // rc bot cfg <target> [<lever> <value>] - reads or sets per-bot AI levers.
     public class CfgSubCommand : IBotSubCommand
     {
         public BotCommandEnum SubCommandName => BotCommandEnum.Cfg;

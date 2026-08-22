@@ -4,10 +4,7 @@ using MDS.Systems;
 
 namespace MDS.ConsoleCommands
 {
-    // rc summonLine [count] [faction class] [ai] [death] [name [regtag [uniformId]]]
-    // Forms a shoulder-to-shoulder line of bots centred on the caller, facing the caller's direction. Faction and
-    // class default to the caller's. To centre the line on another player instead, which is the route that works
-    // from free roam, use 'rc summonLineAt <playerId>'.
+    // rc summonLine [count] [spec...] - a line summoned onto the caller.
     public class SummonLineCommand : IConsoleCommand
     {
         public ConsoleCommandEnum CommandName => ConsoleCommandEnum.SummonLine;

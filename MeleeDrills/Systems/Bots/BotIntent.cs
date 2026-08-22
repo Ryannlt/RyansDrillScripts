@@ -8,11 +8,10 @@ namespace MDS.Systems
     {
         public Vector2? MoveAxis;    // (sideways, forwards), each in [-1, 1]
         public float? LookHeading;   // degrees from North
+        public float? LookPitch;     // vertical aim, 0 being level; see BotController.PitchRefreshSeconds
         public bool? Running;        // toggle run
 
-        // The action channel: a single carbonPlayers 'playerAction' token to issue this tick (null = none), such
-        // as a melee windup, strike, or block. Actions are edge-triggered, so a brain emits one only on the tick
-        // it wants it; held states like a block are started once and stopped later, not re-sent each tick.
+        // The action channel: one carbonPlayers playerAction token this tick, null for none. Edge-triggered.
         public string Action;
 
         public static BotIntent Idle => new BotIntent();

@@ -5,19 +5,7 @@ using MDS.Core;
 
 namespace MDS.Systems
 {
-    // Resolves where a summon should land for a given caller.
-    //
-    //  - Embodied (alive and spawned): the caller's own transform, resolved immediately, unchanged behavior.
-    //  - Free roam or spectating: the caller's viewpoint, taken from their next packet and dropped to the ground
-    //    (camera position when the server gets it, otherwise the reported owner position).
-    //
-    // The second case exists because PlayerObject survives death as the corpse, so summoning from the free camera
-    // used to teleport bots to the dead body. StateTracker.IsSpectator is the right test: free-flight, spectate,
-    // and not-yet-spawned callers all land in the spectator list (OnStartFreeflight, OnStartSpectate, and
-    // OnPlayerJoined feed it, and OnPlayerSpawned removes them again).
-    //
-    // The free-roam path is asynchronous: it resolves on the caller's next packet, the same trade-off the
-    // arena-corner commands already accept. If the client sends no packet, onResolved never fires.
+    // Resolves where a summon should land for a caller: spawned body, spectator, or free roam.
     public static class SummonOrigin
     {
         // Below this planar length the camera points almost straight up/down and has no usable yaw.
@@ -47,10 +35,7 @@ namespace MDS.Systems
             onResolved(new BotPlacement(t.position, t.eulerAngles.y));
         }
 
-        // Origin at another player's live position. Synchronous, since their transform is readable directly with
-        // no packet needed. Refuses a target who isn't currently embodied, since PlayerObject would then be a
-        // stale corpse, the same trap the caller path avoids. This is the route that works while the caller is in
-        // free roam, where the server never learns the caller's own position.
+        // Origin at another player's live position.
         public static void ResolveAtPlayer(int targetPlayerId, Action<BotPlacement> onResolved, Action<string> onFailed)
         {
             IPlayer target = StateTracker.GetPlayerById(targetPlayerId);
@@ -70,12 +55,7 @@ namespace MDS.Systems
             onResolved(new BotPlacement(t.position, t.eulerAngles.y));
         }
 
-        // Free roam: place directly below the viewpoint (its X,Z dropped to the ground), facing the view direction.
-        //
-        // CameraPosition is preferred, but the server isn't always given camera fields for a free-flying or
-        // spectating player (they come back null), so OwnerPosition is the fallback; in free flight it tracks the
-        // flying viewpoint rather than the corpse. Which fields actually arrived is logged, because this varies by
-        // mode and is the first thing to check if placement looks wrong.
+        // Free roam: place directly below the viewpoint, since it has no body on the ground.
         private static void ResolveFromViewpoint(int playerId, Action<BotPlacement> onResolved, Action<string> onFailed)
         {
             Logger.Log($"Awaiting viewpoint of player {playerId} to resolve summon origin...", LogLevel.DEBUG);
@@ -119,9 +99,7 @@ namespace MDS.Systems
             onFailed("Cannot summon - no position received while in free roam. Spawn in first, or place bots with 'rc spawnLine <x> <z> <rotation>'.");
         }
 
-        // The heading (degrees from North) the viewpoint looks along: the camera forward when present,
-        // otherwise the reported yaw, otherwise North. A near-vertical camera (looking straight down, likely
-        // when placing from above) has no usable planar direction, so it falls through to the yaw.
+        // The heading the viewpoint looks along, in degrees from North.
         private static float ViewHeading(PlayerPacketData packet)
         {
             if (packet.CameraForward.HasValue)

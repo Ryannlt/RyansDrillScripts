@@ -5,21 +5,13 @@ using UnityEngine;
 using MDS.ConfigVariables;
 using MDS.Core;
 
-// Owns the bot-line geometry and the map-load auto-populate queue.
-//
-//  - SpawnLine(...) is the single reusable formation builder (called by SpawnLineEvent for the runtime
-//    summonLine/spawnLine commands, and directly here for staged map-load lines). Keeping the geometry
-//    in the Systems layer lets map-load spawn lines without the Systems layer dispatching events.
-//  - Staged lines come from the 'SpawnLine' config variable (PassConfigVariables). They are held until
-//    the round begins (StateTracker.OnRoundDetails -> SpawnStagedLines) and replayed every round.
+// Owns the bot-line geometry and the map-load auto-populate.
 
 namespace MDS.Systems
 {
     public static class LineManager
     {
-        // Bots are requested shortly AFTER the round starts so the world/terrain/spawn system is ready
-        // (OnRoundDetails can fire a touch before spawning is accepted). Failed spawns self-heal via the
-        // BotManager ghost timeout, so this only needs to be "usually enough".
+        // Bots are requested shortly after the round starts, so the spawn sections exist.
         private const float SpawnDelaySeconds = 3f;
 
         private static readonly List<StagedLine> _staged = new();

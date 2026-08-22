@@ -2,12 +2,7 @@ using MDS.Systems;
 
 namespace MDS.Events
 {
-    // Spawns one or more bots. The COMMAND layer resolves caller context (faction/class, placement)
-    // into explicit values; this event is caller-agnostic and reusable by drills.
-    // Parameters: (BotSpawnSpec spec | null for random, int count, BotAiEnum ai, BotDeathPolicy death,
-    //              BotPlacement? placement, [int? guardTargetId])
-    // The optional sixth parameter names a player for a guardian AI to escort; the summon commands pass the
-    // player the bot was summoned onto.
+    // Spawns one or more bots. The command layer resolves caller context; this takes explicit data only.
     public class SpawnBotsEvent : IEvent
     {
         public EventEnum EventName => EventEnum.SpawnBots;

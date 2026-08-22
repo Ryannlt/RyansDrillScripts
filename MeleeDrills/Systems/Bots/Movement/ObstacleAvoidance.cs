@@ -2,26 +2,14 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // Obstacle avoidance via forward whiskers: cast a few rays ahead of the bot in its travel direction; if the
-    // nearest hits static geometry within the lookahead, return a world-XZ velocity steering away from the hit
-    // surface along its normal, stronger the closer the hit. Zero when the path is clear.
-    //
-    // This is the one steering behavior that isn't pure, since it queries Physics. Whiskers are cast at chest
-    // height so the flat ground below isn't hit. See ObstacleLayerNames for which layers count as obstacles; add
-    // "Players Out of Bounds Collider", for example, to keep bots inside the map bounds.
+    // Obstacle avoidance via forward whiskers: cast a few rays and steer off whatever they hit.
     public static class ObstacleAvoidance
     {
         public const float DefaultLookahead = 2.5f;    // whisker length (m)
         public const float DefaultFeelerAngle = 30f;   // side whisker spread (deg)
         public const float DefaultCastHeight = 1f;      // ray origin height above the bot's feet (m)
 
-        // Layers treated as solid obstacles to steer around:
-        //   "Static Environment" (13), map walls and static geometry.
-        //   "Damageable Collider" (22), sapper-built structures like palisades and emplacements.
-        //
-        // For layer 22: the buildable's root GameObject sits on Default (0) and carries no collider of its own;
-        // the collider lives on a child on layer 22. Unity layers are per-GameObject and not inherited, and a
-        // raycast reports the collider's layer, so masking Default achieved nothing here.
+        // Layers treated as solid obstacles to steer around.
         private static readonly string[] ObstacleLayerNames = { "Static Environment", "Damageable Collider" };
         private static readonly int ObstacleMask = LayerMask.GetMask(ObstacleLayerNames);
 

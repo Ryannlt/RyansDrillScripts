@@ -2,14 +2,7 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // Turns steering into a BotIntent. Assemble localises a world velocity (from the Steering layer, possibly
-    // blended) into the input axis and coupled facing. The other behaviors here are the ones that don't fit the
-    // pure-velocity model: Wander (stateful), Face and FacePoint (rotation only), and Stop. There's no engine
-    // I/O, since BotController.ApplyIntent issues the commands, so these stay unit-testable.
-    //
-    // A halt returns a zero axis, an explicit stop, never BotIntent.Idle: a null axis means "issue no axis
-    // command", which leaves the previously-sent axis in place and the bot would keep moving. Run is a sticky
-    // mode set elsewhere once, so it is left null here.
+    // Turns steering into a BotIntent, localising a world velocity into the bot's own frame.
     public static class MovementBehaviors
     {
         private const float EpsilonSqr = 0.0001f;
@@ -21,16 +14,10 @@ namespace MDS.Systems
         public const float DefaultWanderDecay = 1.5f;   // pull of the wander angle back toward straight-ahead (1/sec)
         private const float MaxWanderAngle = 60f;       // hard clamp on the wander angle (deg)
 
-        // Below this net throttle, treat the desired velocity as "at rest" and halt. Our kinematic model has
-        // no physical friction, so a tiny residual velocity (e.g. near-balanced Separation forces at an
-        // equilibrium) would otherwise be issued forever as perpetual micro-movement. This deadband is that
-        // missing friction - it lets blended behaviors settle to a stop. Single behaviors never sit in
-        // (0, RestThreshold) (Seek/Flee are 0 or full; Arrive halts at 0.5 throttle), so only blends feel it.
+        // Below this net throttle, treat the desired velocity as a stop rather than a crawl.
         private const float RestThreshold = 0.15f;
 
-        // Localizes a desired world velocity (from Steering, possibly blended) into a BotIntent: input axis
-        // in the bot's frame, facing the direction of travel (coupled). Sub-threshold velocity halts (see
-        // RestThreshold). Magnitude beyond 1 is clamped to full throttle.
+        // Localises a desired world velocity into the axis pair the engine takes.
         public static BotIntent Assemble(BotPose pose, Vector2 worldVelocity)
         {
             float mag = worldVelocity.magnitude;
@@ -42,20 +29,13 @@ namespace MDS.Systems
             return new BotIntent { MoveAxis = axis, LookHeading = MovementSolver.HeadingOf(dir) };
         }
 
-        // Wander: smooth, undirected roaming (Millington's steering wander), returned as a world velocity so it
-        // can be blended with corrective behaviors like obstacle and collision avoidance. A target rides the rim
-        // of a circle projected ahead of the bot; that rim point drifts by a small random amount each tick and the
-        // bot seeks it, producing gentle continuous turns rather than jittery noise. It is stateful: the caller
-        // owns wanderAngle (passed by ref) so it persists across ticks. It uses UnityEngine.Random, so unlike the
-        // pure Steering behaviors it is not deterministic. Assemble it (or blend first) to get a BotIntent.
+        // Wander: smooth undirected roaming, Millington's steering-behaviour formulation.
         public static Vector2 WanderVelocity(BotPose pose, ref float wanderAngle, float deltaTime) =>
             WanderVelocity(pose, ref wanderAngle, DefaultWanderOffset, DefaultWanderRadius, DefaultWanderRate, DefaultWanderDecay, deltaTime);
 
         public static Vector2 WanderVelocity(BotPose pose, ref float wanderAngle, float offset, float radius, float rate, float decay, float deltaTime)
         {
-            // Random-walk the wander angle, but pull it back toward 0 (straight ahead) each tick. An
-            // unbounded walk parks off-centre and the bot circles forever; this restoring force keeps the
-            // angle hovering around forward so the path meanders instead. Clamp is a hard safety cap.
+            // Random-walk the wander angle but pull it back toward straight ahead.
             wanderAngle += RandomBinomial() * rate * deltaTime;
             wanderAngle -= wanderAngle * decay * deltaTime;
             wanderAngle = Mathf.Clamp(wanderAngle, -MaxWanderAngle, MaxWanderAngle);

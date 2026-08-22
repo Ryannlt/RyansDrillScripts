@@ -3,10 +3,7 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // The blendable steering layer. Each behavior returns a desired world velocity (Vector2 in XZ, magnitude is
-    // throttle in [0,1]), Millington's linear steering output. Because these are plain vectors, several can be
-    // weight-summed by Blend, and MovementBehaviors.Assemble then localises the result into a BotIntent. They're
-    // pure and unit-testable: Separation takes neighbour positions, not BotManager.
+    // The blendable steering layer. Each behaviour returns a desired world velocity.
     public static class Steering
     {
         private const float EpsilonSqr = 0.0001f;
@@ -28,9 +25,7 @@ namespace MDS.Systems
         public const float DefaultCollisionRadius = 1.2f;
         public const float DefaultCollisionLookahead = 2f;
 
-        // Ignore pairs closing slower than this (m/s). Near-stationary bots have velocity estimates that are just
-        // sub-tick position noise; reacting to that would fight Separation and jitter. Collision avoidance is for
-        // agents crossing at speed; static spacing is Separation's job.
+        // Ignore pairs closing slower than this; near-stationary neighbours are Separation's job.
         public const float DefaultMinClosingSpeed = 0.75f;
 
         // Full-speed velocity straight at the target (zero once arrived).
@@ -65,18 +60,11 @@ namespace MDS.Systems
         public static Vector2 Pursue(BotPose pose, Vector2 targetPos, Vector2 targetVel) =>
             Seek(pose, PredictTarget(pose.Position, targetPos, targetVel));
 
-        // Evade: flee where the threat is heading, the mirror of Pursue. This is faithful Millington evade, which
-        // assumes the evader is at least as fast as the threat; when the threat is faster or jinks, the predicted
-        // point can sit beside the evader and steer it toward the pursuer. For a reliable escape later, fall back
-        // to fleeing the threat's current position when out-paced, and jink.
+        // Evade: flee where the threat is heading, the mirror of Pursue.
         public static Vector2 Evade(BotPose pose, Vector2 threatPos, Vector2 threatVel) =>
             Flee(pose, PredictTarget(pose.Position, threatPos, threatVel));
 
-        // Repulsion from crowding, as a comfort zone: a neighbour at or beyond comfortRadius exerts no push, and
-        // the push fades quadratically toward that boundary, so there's a broad low-force band near the comfortable
-        // spacing where bots settle without the persistent nudge a linear falloff leaves (that residual was the
-        // source of equilibrium jitter). The force only grows firm when a neighbour is notably closer than
-        // comfortable. Magnitude is left unclamped for Blend to sum.
+        // Repulsion from crowding, as a comfort zone rather than a hard push.
         public static Vector2 Separation(BotPose pose, IReadOnlyList<Vector2> neighbours, float comfortRadius)
         {
             Vector2 push = Vector2.zero;
@@ -92,11 +80,7 @@ namespace MDS.Systems
             return push;
         }
 
-        // Collision avoidance (Millington): avoid future collisions with moving agents. For each neighbour, find
-        // the time to closest approach from relative position and velocity; among genuine threats (closest
-        // approach within radius, in the future, within lookahead) steer away from the most imminent one at its
-        // projected closest point. Unlike Separation's static repulsion, this ignores neighbours you'll pass
-        // safely and reacts to crossing paths. Pure: selfVel and neighbour velocities are world XZ units/sec.
+        // Collision avoidance (Millington): avoid the future collision, not the current position.
         public static Vector2 CollisionAvoidance(BotPose pose, Vector2 selfVel,
             IReadOnlyList<(Vector2 pos, Vector2 vel)> neighbours, float radius, float maxLookahead)
         {
@@ -129,10 +113,7 @@ namespace MDS.Systems
 
             if (!haveThreat) return Vector2.zero;
 
-            // Steer away from where the threat will be at closest approach, relative to us, scaled by how imminent
-            // it is: a collision far in the future gets only a slight nudge, one about to happen gets a firm turn.
-            // The squared falloff keeps the correction gentle until the threat is close; without it every detected
-            // threat steers at full strength and paths swing wildly early.
+            // Steer away from where the threat will be at closest approach.
             Vector2 avoidFrom = threatRelPos + threatRelVel * shortestTime;
             if (avoidFrom.sqrMagnitude < 1e-6f) avoidFrom = threatRelPos; // dead head-on: use current offset
 
@@ -141,9 +122,7 @@ namespace MDS.Systems
             return (-avoidFrom).normalized * urgency;
         }
 
-        // Weighted sum of steering velocities, clamped to unit magnitude (full throttle). This is the whole blend
-        // arbitration for now: relative influence comes from the weights, and cancellation is possible, a known
-        // blended-steering caveat, to revisit if we adopt priority arbitration later.
+        // Weighted sum of steering velocities, clamped to unit magnitude.
         public static Vector2 Blend(params (Vector2 velocity, float weight)[] parts)
         {
             Vector2 sum = Vector2.zero;

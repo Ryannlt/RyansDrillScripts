@@ -3,8 +3,6 @@ using MDS.Systems;
 namespace MDS.Events
 {
     // Sets the death policy of all tracked bots matching a target token.
-    // Target: <playerId> | all | attacking | defending | <faction name>
-    // Parameters: (string target, BotDeathPolicy policy)
     public class SetBotDeathPolicyEvent : IEvent
     {
         public EventEnum EventName => EventEnum.SetBotDeathPolicy;

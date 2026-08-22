@@ -4,34 +4,7 @@ using UnityEngine;
 
 namespace MDS.Systems
 {
-    // Melee combat AI. It faces its target, holds spacing, and blocks the target's attacks with the guard that
-    // counters their windup direction (BlockTokenFor). Depending on its toggles it also presses in to attack and
-    // ripostes after a block. Perception comes from CombatTracker (the target's melee state, read from packets);
-    // it acts through the BotIntent action channel, using block and strike tokens verified on a live bot with
-    // 'rc bot act'.
-    //
-    // One class, several presets selected by BotAiEnum and built from lever bundles in DefaultLeversFor:
-    //   RiposteDummy stands its ground, blocks, and only counters once provoked (press off, riposte on).
-    //   DuelingEasy / DuelingNormal / Dueling wait passively, blocking the nearest player, until someone attacks
-    //     them; then they lock that attacker and fight to the death before returning to passive. The tiers differ
-    //     only in reaction speed. A Replace replacement starts passive again.
-    //   GroupEasy / GroupNormal / Group are those plus formation fighting and the drill-station cycle, so a batch
-    //     summoned together waits, wakes as one, backs off to re-form, fights, and returns to its post.
-    // StabbingDummy is a separate class (MeleeDummy), a static stabber with no perception.
-    //
-    // This file is the decision: what the bot does each tick. The levers themselves - the fields, the per-preset
-    // defaults, and the IConfigurableAi plumbing - are in MeleeAi.Levers.cs, because presets are lever bundles and
-    // that bookkeeping grows with every behaviour added here. The strike-mechanic constants below are NOT levers:
-    // they encode how the engine plays a stab out, measured in-game, so changing them just breaks the bot.
-    //
-    // Targeting is lever-driven too (ResolveTarget): targetRange gates who it engages, ignoreTeam and ignoreBots
-    // filter by faction and human-vs-bot, and stickyTarget picks holding one foe versus the closest each tick. An
-    // automatic attacker-lock keeps it on whoever is mid-strike, and an ITargetableAi pin lets a future supervisor
-    // override the choice.
-    //
-    // Strike quirk: a raw MeleeStrike token latches an auto-cycling attack loop, so a strike is a short held
-    // chamber (one MeleeStrike) released by a single ExecuteMeleeWeaponStrike, which also stops the cycle. See
-    // StepAttack.
+    // Melee combat AI: faces its target, holds spacing, blocks, and throws stabs. Levers in MeleeAi.Levers.cs.
     public partial class MeleeAi : IBotAi, IConfigurableAi, ITargetableAi, IGuardianAi, ISquadMember
     {
         // How hard the push away from other bots counts next to the movement it is blended into.
@@ -42,20 +15,22 @@ namespace MDS.Systems
 
         // Strike-mechanic timings, measured from the engine. Not levers.
         private const float WindupSeconds = 0.15f;    // hold the windup this long (one MeleeStrike) before releasing
-        // A committed stab occupies the bot about this long before it can throw again, whether it misses or is
-        // blocked (both measured near 1.5s from a human spamming attack; the engine's ~0.35s block stun does not
-        // shorten it). Throwing the next strike sooner overlaps the still-playing swing. Timed from release.
+        // A committed stab occupies the bot this long whether it misses or is blocked. Timed from release.
         private const float MissedStabDuration = 1.5f;
-        private const float StrikeCommitWindow = 0.5f; // after releasing a strike, don't block or we cancel our own swing before it lands
+        // Extra time we refuse to block after throwing first. Nerve, not geometry - not part of blade-live time.
         private const float FirstStrikeCommitBonus = 0.4f; // extra commit time when we threw first, so we back our stab instead of flinching into a guard
         private const float MinBlockHold = 0.35f;      // keep a raised guard up at least this long so it reads and animates
         private const float AimOffset = 0.3f;          // sideways aim shift while striking to centre a right-hand stab, metres
 
-        // Quiet period after spawning before the bot may throw anything. Striking on the first tick out of the
-        // spawn plays the swing wrong - the animation never settles - which a Replace bot hits every time it comes
-        // back next to whoever just killed it. Measured by eye rather than probed, so adjust if a fresh bot still
-        // swings badly. Not a lever: it describes the engine, like the timings above.
+        // Striking on the first tick out of a spawn plays the animation wrong.
         private const float SpawnStrikeDelay = 1.0f;
+
+        // Blade geometry, resolved from the game's baked table against aimPitch. These are the pitch-0 values.
+        private float BladeReach = 2.065f;   // how far the blade line extends from the body, metres
+        private float BladeBearing = 16.1f;  // degrees the blade sits off the facing, positive to the bot's right
+
+        // How long after our release the blade is treated as out. Measured in our frame, not the game's.
+        private const float StrikeCommitWindow = 0.9f;
 
         // Movement feel. Kept const for now.
         private const float RangeTolerance = 0.3f;     // slop band around the hold range where the bot just stands
@@ -65,13 +40,18 @@ namespace MDS.Systems
         private const float StrikerLockRange = 3f;     // attacker-lock only triggers for strikers within this when targetRange is unlimited
         private const float SlotDeadband = 0.15f;      // close enough to the slot to stop rather than shuffle
 
+        // The engine refuses a melee hit past this vertical gap, before any of its raycasts run.
+        private const float MateVerticalReach = 1.5f;
+
+        // How often a bot picks a new personal misplacement, and how fast it slides to it.
+        private const float SlotBiasRerollMin = 2f;    // seconds
+        private const float SlotBiasRerollMax = 5f;
+        private const float SlotBiasDriftRate = 0.35f; // metres per second
+
         // The tuning levers, the per-preset defaults and the IConfigurableAi plumbing all live in
         // MeleeAi.Levers.cs. Everything below is runtime state: what this bot is doing right now.
 
-        // The ward's faction, refreshed once per tick. While guarding, sides are judged from the ward rather than
-        // from the bot itself: the game does not always honour the faction we ask spawnSpecific for (a full team
-        // or a capped class gets silently substituted), and a guard that reads sides from its own body would then
-        // count its ward as the enemy and cut them down. Judging from the ward makes a wrong-team spawn harmless.
+        // While guarding, sides are judged from the ward rather than from the bot itself.
         private FactionCountry? _wardFaction;
 
         private readonly BotAiEnum _aiType;
@@ -88,10 +68,7 @@ namespace MDS.Systems
         private int? _engagedTargetId;        // engageOnAttack runtime: the attacker we fight until it (or we) die
         private float _lastEngageBlock;       // engageOnAttack runtime: block time we last engaged off (dedupe)
 
-        // Who last hit our guard, tracked for every preset rather than only the engageOnAttack ones. A drill
-        // station has to know it was attacked even when its preset has no engage machine of its own, which is
-        // what makes 'post' work on a RiposteDummy. Cleared by StandDown, or a station would wake itself again
-        // on a stale provocation the moment it got home.
+        // Who last hit our guard. Tracked for every preset, since a station wakes its group from it.
         private int? _provokedBy;
         private float _lastProvokeBlock;
         private bool _stancePending = true;   // issue EnableCombatStance once, on the first spawned tick
@@ -107,6 +84,7 @@ namespace MDS.Systems
         {
             Waiting,     // engageOnAttack and not yet provoked: face and block, throw nothing
             BackingOff,  // provoked, re-establishing range and formation before it will swing
+            Holding,     // set and in range, but the group's engage delay has not run out yet
             Withdrawing, // breaking off from a live enemy: still blocks and counters, but gives ground and won't press
             Fighting
         }
@@ -124,7 +102,14 @@ namespace MDS.Systems
         private float _lastConsumedBlock;     // last block we reacted to as defender (dedupe)
         private float _riposteReadyAt;        // realtime before which we hold the guard (reaction beat) before countering
         private float _priorityUntil;         // while now < this: riposte immediately, don't re-block
-        private float _strikeCommittedUntil;  // while now < this: our own strike is in flight, don't block (it'd cancel it)
+        private float _strikeCommittedUntil;  // while now < this: don't block (it'd cancel our own swing). Includes the first-strike nerve bonus.
+        private float _bladeLiveUntil;        // while now < this: the blade is actually out, so the aim cap and mate clamp apply
+
+        // Diagnostics only, read by MeleeProbe when a bot kills a bot. The aim the swing wanted versus the aim it
+        // was allowed, which is what tells a clamp that never engaged from a clamp that engaged and was not enough.
+        private float _lastAimDesired;
+        private float _lastAimClamped;
+        private int _selfId = -1;
         private float _blockStartedAt;        // realtime the current guard went up (for MinBlockHold)
         private float _blockDesiredSince = -1f; // realtime we first wanted this guard (for block reaction; -1 = not)
         private float _blockReadyAt;          // realtime the guard may go up (start plus block reaction beat)
@@ -132,7 +117,9 @@ namespace MDS.Systems
 
         // How badly this bot is holding the line right now (see slotError / formationLag).
         private bool _wasInSquad;             // formed up last tick, so we can tell when a bout's formation begins
-        private Vector2 _slotBias;            // its personal misplacement, fixed for the bout
+        private Vector2 _slotBias;            // its personal misplacement right now, drifting toward _slotBiasTarget
+        private Vector2 _slotBiasTarget;      // the misplacement it is currently sliding toward
+        private float _slotBiasRerollAt;      // realtime it next picks a new one
         private Vector2 _slotSeen;            // the slot position it is working from, which may be out of date
         private bool _slotSeenValid;          // guards against chasing world origin before the first sample
         private float _resampleAt;            // realtime it next looks at where it is actually supposed to be
@@ -151,10 +138,9 @@ namespace MDS.Systems
             if (!self.TryGetPose(out BotPose pose))
                 return BotIntent.Idle; // not spawned, issue nothing
 
-            // Player ids are recycled, so a new bot can be handed an id that already carries block history from
-            // whoever held it before. Take whatever is on record as the baseline on the first tick, so only
-            // blocks that land from now on count as ours; otherwise a replacement would come back believing it
-            // had just blocked, and immediately counter or engage a player it never fought.
+            _selfId = self.PlayerId;   // StepAttack records its strike against it and has no self of its own
+
+            // Player ids are recycled, so take whatever is on record as the baseline on the first tick.
             if (_blockBaselinePending)
             {
                 _blockBaselinePending = false;
@@ -173,21 +159,20 @@ namespace MDS.Systems
                     _provokedBy = attacker;
             }
 
-            // A provocation lasts only as long as the player who made it. Without this it names them forever -
-            // StandDown is the only other thing that clears it, and a bot with no station never calls it - so the
-            // moment that id respawned the formation would re-form and run at whoever now holds it.
+            // A provocation lasts only as long as the player who made it.
             if (_provokedBy is int provoker && !IsCandidate(self, StateTracker.GetPlayerById(provoker), ignoreRange: true))
                 _provokedBy = null;
 
-            // Let go of a windup that was dropped rather than thrown. A raw MeleeStrike latches the engine's
-            // attack loop and only ExecuteMeleeWeaponStrike or a block stops it, so abandoning a chamber any
-            // other way leaves the bot cycling stabs on its own while nothing in here believes it is attacking.
-            // The places that drop one - losing the target, being stood down, going back to escorting - have no
-            // action channel at the time, so they flag it and the release goes out here.
+            // Let go of a windup that was dropped rather than thrown; a raw MeleeStrike latches the attack loop.
             if (_releasePending)
             {
                 _releasePending = false;
-                _attackCooldownUntil = Time.realtimeSinceStartup + MissedStabDuration;
+                float releasedAt = Time.realtimeSinceStartup;
+                _attackCooldownUntil = releasedAt + MissedStabDuration;
+
+                // A dropped windup still puts the blade out, so the mid-swing hold has to know about it.
+                _bladeLiveUntil = releasedAt + StrikeCommitWindow;
+
                 return new BotIntent { Action = "ExecuteMeleeWeaponStrike", MoveAxis = Vector2.zero };
             }
 
@@ -211,15 +196,22 @@ namespace MDS.Systems
             // partner to divide the work with, so it fights as itself even while it holds a slot.
             bool inSquad = _squad && hasSlot && slot.Members > 1;
 
-            // Freshly formed up: pick how badly this bot holds the line for the coming bout. Rolled once and kept,
-            // so a player can read a sloppy pair and work the gap instead of watching it wander; rolled from zero,
-            // so some bouts they simply line up properly and the gap is not there at all.
-            if (inSquad && !_wasInSquad) RollFormationError();
+            // Freshly formed up: take up a place rather than sliding into one from the last bout.
+            if (inSquad && !_wasInSquad)
+            {
+                RollFormationError();
+                _slotBias = _slotBiasTarget;   // take up a place, rather than sliding into one from the last bout
+                _slotSeenValid = false;        // and look at where it really should be
+                _resampleAt = 0f;
+            }
+            else if (inSquad)
+            {
+                StepFormationError(now, deltaTime);
+            }
+
             _wasInSquad = inSquad;
 
-            // A slot is the whole movement decision for a formation. For a lone bot on a station it only governs
-            // walking back to the post and backing off when provoked; once the fight is on it keeps its own
-            // spacing, so turning post on doesn't quietly turn a duellist into a formation member.
+            // A slot is the whole movement decision for a formation; for a lone station, only the walk home.
             bool slotDrivesMovement = hasSlot && (inSquad || slot.Phase != SquadPhase.Engaged);
 
             // The ward is resolved first because targeting reads sides from them while we are guarding.
@@ -237,28 +229,32 @@ namespace MDS.Systems
             {
                 AbandonChamber(); // don't resume a stale chamber when a target is reacquired
 
-                // Nobody to fight. A bot with a slot walks back to it and faces the way the line faces, which is
-                // what returns a station to its post once the drill is over rather than leaving it wherever the
-                // fight happened to end.
+                // No slot and nothing to fight: issue no movement at all.
                 if (!hasSlot)
-                    return DropBlock(new BotIntent { MoveAxis = Vector2.zero });
+                    return DropBlock(new BotIntent { MoveAxis = Vector2.zero, LookPitch = _aimPitch });
 
                 // Exact slot, no bias and no lag: holding a fighting line badly is the drill, walking home badly
                 // is just sluggish.
                 Vector2 idleMove = _move ? EngageVelocity(pose, slot.Position, true, slot.Position, 0f, false) : Vector2.zero;
 
-                // Look where it is going while it is going there, and only take up the formation's bearing once
-                // it arrives. Movement is relative to facing, so walking a long way home sideways or backwards is
-                // needlessly slow; turning first and running is how a person would cross the same ground.
+                // Look where it is going while it is going there, and take the formation's bearing on arrival.
                 float idleHeading = idleMove.sqrMagnitude > 1e-4f
                     ? MovementSolver.HeadingOf(idleMove)
                     : slot.Facing;
 
-                var idleIntent = new BotIntent { MoveAxis = ToAxis(pose, idleMove), LookHeading = idleHeading };
+                // Unless the blade is still out, in which case hold what we have until it is back in.
+                if (BladeLive(now))
+                {
+                    idleHeading = pose.Heading;
 
-                // Running is a sticky engine toggle established once, and it used to be set only on the paths
-                // that lead to a fight. A bot walking back to its post never took any of those, so it made the
-                // whole trip at walking pace and only sped up later, the first time something provoked it.
+                    if (MeleeProbe.IsProbing(self.PlayerId))
+                        MeleeProbe.LogBladeHold(self.PlayerId, pose.Heading, slot.Facing, "target gone");
+                }
+
+                // Carried on every path, not just the fighting one, or the lever looks inert until something provokes.
+                var idleIntent = new BotIntent { MoveAxis = ToAxis(pose, idleMove), LookHeading = idleHeading, LookPitch = _aimPitch };
+
+                // Running is a sticky engine toggle, established once.
                 if (_runPending)
                 {
                     idleIntent.Running = true;
@@ -272,29 +268,25 @@ namespace MDS.Systems
             Vector2 targetPos = new Vector2(tp.x, tp.z);
             CombatTracker.TryGet(target.PlayerId, out CombatTracker.MeleeState enemy);
 
-            // What the bot is doing this tick. Deliberately its own axis, separate from where its swing is
-            // (_attackPhase, committed, priority below): the two are independent, and a new stance should be a
-            // new case here rather than another '&& !flag' on every clause that already exists.
+            // What the bot is doing this tick. Its own axis, separate from where its swing is.
             Posture posture =
                 hasSlot && slot.Phase == SquadPhase.Breaking    ? Posture.BackingOff  // re-forming, guard up, no swings
                 : hasSlot && slot.Phase == SquadPhase.Withdrawing ? Posture.Withdrawing
+                : hasSlot && now < slot.AttackAllowedAt         ? Posture.Holding     // set, but not cleared to swing yet
                 : _engageOnAttack && !_engaged                  ? Posture.Waiting     // provoked-on-attack, not yet provoked
                 : Posture.Fighting;
 
-            // Only a fighting bot presses, counters or chases. A withdrawing one is leaving: it does not swing and
-            // it does not go looking for someone else, it just gets home without being cut down. Every posture
-            // still blocks, and a chamber already in flight still releases below, since a held strike left alone
-            // auto-cycles.
+            // Only a fighting bot presses, counters or chases. Every posture still blocks.
             bool fighting = posture == Posture.Fighting;
             bool press = _press && fighting;
             bool riposte = _riposte && fighting;
             bool pursue = _pursue && fighting;
 
-            // Face the target's actual position; leading where it's going made the bot over-rotate up close. While
-            // striking, nudge the aim sideways because the stab comes off the right of the body, so the thrust
-            // lands on centre of mass.
+            // While striking, nudge the aim sideways so the right-hand stab lands on centre of mass.
+            bool swingLive = BladeLive(now);
+
             Vector2 aimPos = targetPos;
-            if (_attackPhase == AttackPhase.Chamber || now < _strikeCommittedUntil)
+            if (swingLive)
             {
                 Vector2 toTarget = targetPos - pose.Position;
                 if (toTarget.sqrMagnitude > 1e-4f)
@@ -304,21 +296,30 @@ namespace MDS.Systems
                     aimPos = targetPos + botLeft * AimOffset;
                 }
             }
-            BotIntent intent = new BotIntent { LookHeading = MovementSolver.HeadingTo(pose.Position, aimPos) };
+
+            // A swing follows the aim for its whole length, so only the aim is constrained, and only while live.
+            float crowdDistance = _mateCrowdRatio * (hasSlot && slot.Spacing > 0f ? slot.Spacing : _squadSpacing);
+
+            bool mateAcrossBlade = false;
+            float aimHeading = swingLive
+                ? ClampAimAroundMates(self, pose, aimPos, crowdDistance, out mateAcrossBlade)
+                : MovementSolver.HeadingTo(pose.Position, aimPos);
+
+            // How far the commanded heading actually moves this tick. The engine joins its frames with rays.
+            float turned = swingLive ? Mathf.DeltaAngle(pose.Heading, aimHeading) : 0f;
+
+            if (swingLive && MeleeProbe.IsProbing(self.PlayerId))
+                MeleeProbe.LogSwingTick(self.PlayerId, pose.Heading, _lastAimDesired, aimHeading, turned,
+                    mateAcrossBlade, _gateRadius, _clampRadius, DescribeMates(self, pose));
+
+            BotIntent intent = new BotIntent { LookHeading = aimHeading, LookPitch = _aimPitch };
 
 
-            // Stab priority: after our guard absorbs the enemy's stab they're recovering and can't beat our
-            // counter, so we give ourselves a brief window to riposte at once, ignoring the attack cooldown.
-            // Priority comes only from the engine's block event, a real absorbed hit, never a guess.
+            // Stab priority: our guard absorbing a stab leaves the thrower recovering, so we counter at once.
             bool priority = false;
             if (riposte)
             {
-                // A coordinated formation shares its guard: a stab any member turns aside is spent, and its
-                // thrower is recovering from it whichever of them caught it, so the whole line is clear to counter
-                // together. The checks below still apply, so a fresh chamber aimed at this bot revokes it.
-                // Only the cooperative half of the coordinate axis shares. Below neutral the pair is actively
-                // avoiding working together, and at neutral they simply are not - neither is a reason to hand a
-                // bot its partner's reads, so the chance ramps from nothing at 0.5 to always at 1.
+                // A coordinated formation shares its guard: a stab any member turns aside is spent.
                 float myBlock = CombatTracker.LastBlockTime(self.PlayerId);
                 float shareChance = Mathf.Max(0f, (_coordinate - 0.5f) * 2f);
                 if (inSquad && Random.value < shareChance) myBlock = Mathf.Max(myBlock, slot.BlockTime);
@@ -330,10 +331,7 @@ namespace MDS.Systems
                     _priorityUntil = _riposteReadyAt + _riposteWindow;                              // window runs after the beat
                 }
 
-                // Only riposte if the enemy has not readied a fresh stab since that block: not winding one up now,
-                // and no windup newer than the block we absorbed. Otherwise they're holding a chambered stab (or
-                // just released one our guard hasn't caught yet) and would spear us the instant the guard drops,
-                // the feint-then-hold exploit. Keep blocking; we re-earn priority when our guard absorbs that stab.
+                // Only riposte if the enemy has not readied a fresh stab since the block we absorbed.
                 priority = now >= _riposteReadyAt && now < _priorityUntil && !enemy.WindingUp && enemy.WindupTime <= _lastConsumedBlock;
             }
 
@@ -343,9 +341,7 @@ namespace MDS.Systems
             // While our own strike is still flying we must not block: a block cancels the swing before it lands.
             bool committed = now < _strikeCommittedUntil;
 
-            // "I threw first" read: our windup began before the enemy started theirs, so our stab lands first and
-            // we commit it rather than bailing to a block. Using IsThreat rather than WindingUp so an instant
-            // reaction-throw still counts as them going second.
+            // I threw first: our windup began before theirs, so commit rather than bailing into a guard.
             bool chamberCommit = (press || riposte) && _attackPhase == AttackPhase.Chamber
                                  && enemy.IsThreat(now) && _chamberStartedAt <= enemy.WindupTime;
             if (chamberCommit) _threwFirst = true; // out-timed them, so commit harder to this swing (see StepAttack)
@@ -360,11 +356,7 @@ namespace MDS.Systems
                 {
                     _blockDesiredSince = now;
 
-                    // Not fighting means the guard goes up on the passive beat, instant by default. A station
-                    // exists to be attacked, so its opening block must be dependable, or at easy reaction speeds
-                    // a walk-up stab ends the drill before it began. The same holds while withdrawing: a bot
-                    // that has stopped swinging and is heading home should not be free to cut down on the way.
-                    // Difficulty lives in the fight itself.
+                    // Not fighting means the guard goes up on the passive beat, instant by default.
                     _blockReadyAt = now + (fighting
                         ? Random.Range(_blockReactionMin, _blockReactionMax)
                         : _passiveBlockReaction);
@@ -382,6 +374,14 @@ namespace MDS.Systems
             if (desiredBlock == null && _blockToken != null && !committed && !chamberCommit
                 && now - _blockStartedAt < MinBlockHold)
                 desiredBlock = _blockToken;
+
+            // Last resort: block to cancel our own stab when no aim clamp can save the mate. Unreliable.
+            if (_abortOnMate && mateAcrossBlade && now < _bladeLiveUntil && desiredBlock == null)
+            {
+                desiredBlock = "MeleeBlockHigh";
+                if (MeleeProbe.IsProbing(self.PlayerId))
+                    Logger.Log($"MeleeSwing[{self.PlayerId}]: aborting own stab, mate across the blade.", LogLevel.INFO);
+            }
 
             Vector2 worldMove = Vector2.zero;
 
@@ -415,17 +415,14 @@ namespace MDS.Systems
                 if (_move)
                     worldMove = EngageVelocity(pose, targetPos, slotDrivesMovement, SlotTarget(slot, now), posture == Posture.Waiting ? _passiveRange : MovementRange(press, now), pursue);
 
-                // Attack when the enemy isn't threatening. With priority this is the post-block riposte and fires
-                // immediately (ignoring cooldown and press), otherwise it's throwing first, gated by press. Skip
-                // the tick we drop the block (StopMeleeBlock took the action channel; the strike resumes next tick).
-                // Also call while a chamber is in progress even if press/riposte just went off (e.g. a Dueling bot
-                // whose target died mid-swing drops to passive) so the held MeleeStrike is released cleanly instead
-                // of being left to auto-cycle.
+                // Attack when the enemy is not threatening. Priority bypasses press and the cooldown.
                 if ((press || riposte || _attackPhase == AttackPhase.Chamber) && !droppedBlock)
-                    // Lane discipline follows the formation, not the coordination: a duellist should still hold a
-                    // swing that would go through the bot beside it. The direction the line wants is only a
-                    // suggestion here - StepAttack decides whether to take it, once, as the swing begins.
-                    StepAttack(ref intent, pose, targetPos, priority, press, !inSquad || slot.LaneClear,
+                    // Range is judged from the slot, so a bot's own jitter cannot veto its offence.
+                    StepAttack(ref intent, pose, targetPos, slotDrivesMovement ? slot.Position : pose.Position,
+                        priority, press,
+                        (!inSquad || slot.LaneClear)
+                            && !(_gateOnMate && (MateInBladeBand(self, pose) || TargetBehindMate(self, pose, aimPos))),
+                        inSquad ? self.GroupId : 0,
                         inSquad ? (slot.StabHigh ? "High" : "Low") : null,
                         inSquad ? (slot.SharedHigh ? "High" : "Low") : null);
             }
@@ -456,9 +453,7 @@ namespace MDS.Systems
             return BlockTokenFor(enemy.WindupDir);
         }
 
-        // Maps the enemy's attack direction (in their frame) to the block the bot raises (in its frame). High and
-        // Low are overhead and underhand, shared, so they match directly. Left and Right mirror: the duellists
-        // face each other, so the attacker's right side is the defender's left, and vice versa.
+        // Maps the enemy's attack direction into the block token that stops it.
         private static string BlockTokenFor(string windupDir)
         {
             switch (windupDir)
@@ -469,42 +464,34 @@ namespace MDS.Systems
             }
         }
 
-        // Attack sequencer. A strike is one MeleeStrike{dir} to start and hold the windup, silence while it holds,
-        // then one ExecuteMeleeWeaponStrike to release it, then a cooldown. Blocking pre-empts this (in Decide). A
-        // priority riposte bypasses both press and the cooldown; a non-priority strike is throwing first and only
-        // fires when press is enabled. assignedDir is the direction that makes an updown with the neighbour and
-        // matchDir the one that deliberately avoids it; both null when there is no formation. Which is taken, if
-        // either, is decided by PickStabDirection.
-        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, bool priority, bool press, bool laneClear, string assignedDir, string matchDir)
+        // Attack sequencer: one MeleeStrike to chamber, silence while it holds, one Execute to release.
+        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, Vector2 reachFrom, bool priority, bool press, bool laneClear, int groupId, string assignedDir, string matchDir)
         {
             float now = Time.realtimeSinceStartup;
 
             if (_attackPhase == AttackPhase.Chamber)
             {
-                // The windup is held by the single MeleeStrike already sent; re-sending it every tick restarts the
-                // windup animation, so while holding we issue nothing. One ExecuteMeleeWeaponStrike releases it and
-                // ends the swing cleanly so it can't then auto-cycle.
+                // Re-sending MeleeStrike restarts the windup, so while holding we issue nothing.
                 if (now >= _executeAt)
                 {
                     intent.Action = "ExecuteMeleeWeaponStrike";
                     _attackPhase = AttackPhase.None;
                     _attackCooldownUntil = now + MissedStabDuration + Random.Range(0f, _attackReadBeat);
+
+                    MeleeProbe.NoteStrike(_selfId, now, _lastAimDesired, _lastAimClamped, _targetId ?? -1, laneClear);
                     _priorityUntil = 0f;                              // riposte thrown, priority spent
                     // Commit to the swing, since blocking now would cancel it. If we threw first, commit longer so
                     // the bot backs its own stab as it lands instead of flinching into a guard and eating the trade.
-                    _strikeCommittedUntil = now + StrikeCommitWindow + (_threwFirst ? FirstStrikeCommitBonus : 0f);
+                    _bladeLiveUntil = now + StrikeCommitWindow;
+                    _strikeCommittedUntil = _bladeLiveUntil + (_threwFirst ? FirstStrikeCommitBonus : 0f);
                 }
                 return;
             }
 
-            // Fresh out of the spawn: don't swing yet. Checked after the chamber release above so nothing can be
-            // left held, and ahead of the priority riposte because a counter is just as capable of firing on the
-            // first tick and playing the animation wrong.
+            // Fresh out of the spawn: do not swing yet.
             if (now < _strikeReadyAt) return;
 
-            // Don't start a swing that would go through a squadmate. Only the start is gated: a chamber already in
-            // flight still releases above, because a held MeleeStrike left alone auto-cycles. Holding the chamber
-            // until the lane clears, and feinting out of it if it doesn't, is the next milestone.
+            // Do not start a swing that would go through a squadmate. Only the start is gated.
             if (!laneClear) return;
 
             // Idle: begin a strike if allowed and close enough. A priority riposte ignores press and cooldown; a
@@ -516,15 +503,15 @@ namespace MDS.Systems
             }
             // A press attack only commits inside attackRange. A priority riposte always throws at the target
             // regardless of range, so a stationary RiposteDummy still counters an attacker who has backed off.
-            if (!priority && (targetPos - pose.Position).sqrMagnitude > _attackRange * _attackRange) return;
+            if (!priority && (targetPos - reachFrom).sqrMagnitude > _attackRange * _attackRange) return;
 
-            // Start the windup with one MeleeStrike, then hold with silence and release on the timer above.
-            // Bayonet is High/Low, and coordinate is an axis rather than a switch: 1 always throws opposite to
-            // the neighbour, 0 always throws the same as it, 0.5 leaves it to chance. Both ends are deliberate
-            // behaviour, which is why the scale needs a middle - two bots picking freely already land an updown
-            // half the time, so "never updown" is something a pair has to actively agree on, not the absence of
-            // agreement. Decided once, here, as the swing starts; rolling per tick would flicker it mid-windup.
-            _attackDir = PickStabDirection(assignedDir, matchDir);
+            // Direction is decided once, here, as the swing starts; per tick would flicker it mid-windup.
+            string dir = PickStabDirection(assignedDir, matchDir);
+
+            // Last gate before the swing, so only a bot actually about to stab files a claim.
+            if (!SquadCoordinator.TryClaimStab(groupId, now, _stabSeparation, dir == "High")) return;
+
+            _attackDir = dir;
             _chamberStartedAt = now;
             _executeAt = now + WindupSeconds;
             _threwFirst = false;                               // set true only if we out-time the enemy this windup
@@ -532,24 +519,14 @@ namespace MDS.Systems
             intent.Action = "MeleeStrike" + _attackDir;
         }
 
-        // Drop a windup for a reason other than throwing or blocking it: the target is gone, the group has been
-        // stood down, the bot is back to escorting. Forgetting the chamber is not enough - the engine is still
-        // cycling the attack until something ends it - so the release is queued for the next tick, when there is
-        // an action channel to send it on. Blocking is the one case that does NOT come through here, because a
-        // block cancels the windup by itself.
+        // Drop a windup without throwing it. The engine keeps cycling the attack until something ends it.
         private void AbandonChamber()
         {
             if (_attackPhase == AttackPhase.Chamber) _releasePending = true;
             _attackPhase = AttackPhase.None;
         }
 
-        // Which way to swing, given what the formation would like. coordinate runs from 0 to 1 with chance in the
-        // middle: the top half is the odds of deliberately making an updown, the bottom half the odds of
-        // deliberately refusing one, and anything not decided that way is a free pick.
-        //
-        // Chance has to sit at 0.5 rather than at 0, because a free pick is not neutral - two bots choosing
-        // independently still throw opposite half the time. Refusing to updown is its own agreement and needs its
-        // own end of the scale, which is the whole reason this is an axis and not a probability of cooperating.
+        // coordinate runs 0 to 1 with chance in the middle: the top half makes updowns, the bottom refuses them.
         private string PickStabDirection(string assignedDir, string matchDir)
         {
             if (assignedDir != null && matchDir != null)
@@ -563,27 +540,28 @@ namespace MDS.Systems
             return Random.value < 0.5f ? "High" : "Low";
         }
 
-        // Picks how badly this bot holds its place for the coming bout. Both magnitudes are rolled from zero, so
-        // the tier decides how often a bot is wrong rather than how wrong it always is - some bouts it simply
-        // stands correctly and the gap a player was expecting is not there.
+        // Picks how badly this bot holds its place. Called on joining a formation, then again on a timer.
         private void RollFormationError()
         {
+            _slotBiasRerollAt = Time.realtimeSinceStartup + Random.Range(SlotBiasRerollMin, SlotBiasRerollMax);
+
             float drift = Random.Range(0f, _slotError);
             float angle = Random.Range(0f, Mathf.PI * 2f);
 
-            // Held in the line's own frame - x across it, y along it toward the enemy - so the sideways half can
-            // be limited on its own. Pushed more than half a spacing sideways a bot ends up past its neighbour,
-            // the sort that keeps each one on its own side swaps them, and the pair walks through each other
-            // trading slots every tick. Fore and aft needs no such limit: a staggered line, one bot up and one
-            // hanging back, is exactly the badly-held formation this is here to produce.
+            // Held in the line's frame. The sideways half is capped so a bot cannot end up past its neighbour.
             float across = Mathf.Cos(angle) * drift;
             float along = Mathf.Sin(angle) * drift;
             float acrossLimit = _squadSpacing * 0.45f;
 
-            _slotBias = new Vector2(Mathf.Clamp(across, -acrossLimit, acrossLimit), along);
+            _slotBiasTarget = new Vector2(Mathf.Clamp(across, -acrossLimit, acrossLimit), along);
+        }
 
-            _slotSeenValid = false;   // start the bout looking at where it really should be
-            _resampleAt = 0f;
+        // Slides the live bias toward the last rolled one, and rolls a new one once it has been held long enough.
+        private void StepFormationError(float now, float deltaTime)
+        {
+            if (now >= _slotBiasRerollAt) RollFormationError();
+
+            _slotBias = Vector2.MoveTowards(_slotBias, _slotBiasTarget, SlotBiasDriftRate * deltaTime);
         }
 
         // Where the bot believes its slot is: out of date by up to formationLag, and off by its bias for this
@@ -616,9 +594,7 @@ namespace MDS.Systems
             _defensiveRange = _defensiveBase + Random.Range(0f, _defensiveVar);
         }
 
-        // The hold range to move toward this tick. Adopting a closer range (advancing) waits a short reaction beat,
-        // like a player backing up takes a moment before running in; backing off applies immediately. Jitter below
-        // MoveHysteresis doesn't count as a change of strategy.
+        // Advancing waits a reaction beat; backing off applies immediately.
         private float MovementRange(bool wantOffensive, float now)
         {
             float target = wantOffensive ? _offensiveRange : _defensiveRange;
@@ -635,10 +611,7 @@ namespace MDS.Systems
             return _appliedRange;
         }
 
-        // World movement to sit at the given hold range: close in if too far, ease back if too close, stand still
-        // inside the tolerance band. Re-solved each tick against the live pose since the target moves. With pursue
-        // off we don't close a gap that's too big (only hold or back off), so a retreating player can walk away
-        // and disengage instead of being followed.
+        // World movement to sit at the given hold range, with a slop band where the bot just stands.
         private static Vector2 HoldRangeVelocity(BotPose pose, Vector2 targetPos, float range, bool pursue)
         {
             Vector2 toTarget = targetPos - pose.Position;
@@ -651,10 +624,7 @@ namespace MDS.Systems
             return Vector2.zero;
         }
 
-        // Movement for this tick. While a slot is driving (a formation, or a station walking home or backing off)
-        // it is the whole decision, taken at full throttle: Arrive was used here first and its ramp is why bots
-        // crawled, since a slot under a metre away sits deep inside the slow radius and comes out at a fraction of
-        // speed. A small deadband stops a bot that is already on its mark from shuffling.
+        // Movement for this tick. A slot overrides the hold range entirely.
         private static Vector2 EngageVelocity(BotPose pose, Vector2 targetPos, bool useSlot, Vector2 slotPos, float holdRange, bool pursue)
         {
             if (useSlot)
@@ -686,8 +656,188 @@ namespace MDS.Systems
             return MovementSolver.ToLocalAxis(pose, worldMove / magnitude, Mathf.Min(magnitude, 1f));
         }
 
-        // Repulsion from the other tracked bots, reusing the steering layer's comfort-zone falloff. Only bots are
-        // considered: crowding a human is the player's business, but bots stacking on each other is ours.
+        // Half-width of the forbidden cone around a mate at this distance. Floored for the clamp, never the gate.
+        private float MateConeHalfWidth(float radius, float dist, bool floored)
+        {
+            float geometric = Mathf.Asin(Mathf.Clamp01(radius / dist)) * Mathf.Rad2Deg;
+            if (!floored || _clampRadius <= 0f || _mateConeFloor <= 0f) return geometric;
+
+            return Mathf.Max(geometric, _mateConeFloor * (radius / _clampRadius));
+        }
+
+        private float ClampAimAroundMates(BotController self, BotPose pose, Vector2 aimPos, float crowdDistance, out bool mateAcross)
+        {
+            mateAcross = false;
+
+            float desired = MovementSolver.HeadingTo(pose.Position, aimPos);
+            _lastAimDesired = desired;
+
+            if (_clampRadius <= 0f) { _lastAimClamped = desired; return desired; }
+
+            // Measured from where the blade points now, and off the blade rather than off the facing.
+            float current = pose.Heading;
+            float blade = current + BladeBearing;
+            float sweep = Mathf.DeltaAngle(current, desired);
+            float limit = sweep;
+
+
+            FactionCountry? ours = self.Bot.Faction;
+            float selfY = self.Position is Vector3 selfPos ? selfPos.y : 0f;
+            var bots = BotManager.Bots;
+
+            for (int i = 0; i < bots.Count; i++)
+            {
+                BotController mate = bots[i];
+                if (mate.PlayerId == self.PlayerId) continue;
+
+                // Enemies never constrain a swing. Unknown factions are treated as friendly, so a bot that has
+                // not spawned yet cannot be run through by accident.
+                FactionCountry? theirs = mate.Bot.Faction;
+                if (ours != null && theirs != null && theirs != ours) continue;
+
+                if (!(mate.Position is Vector3 p)) continue;
+
+                if (Mathf.Abs(p.y - selfY) > MateVerticalReach) continue;   // out of the engine's vertical window
+
+                Vector2 toMate = new Vector2(p.x, p.z) - pose.Position;
+                float dist = toMate.magnitude;
+
+                // Only the blade's length matters, plus the envelope radius, since a mate is a body and not a point.
+                if (dist < 1e-4f || dist > BladeReach + _clampRadius) continue;
+
+                float halfAngle = MateConeHalfWidth(_clampRadius, dist, floored: true);
+
+                // Off the blade, not off the facing. limit stays a delta on the heading either way, since the
+                // blade travels with the body and the offset between them is fixed.
+                float mateDelta = Mathf.DeltaAngle(blade, MovementSolver.HeadingOf(toMate));
+
+                // Close in, bearing stops predicting anything, so a crowded mate widens the band toward the forward arc.
+                if (crowdDistance > 0f && dist < crowdDistance && Mathf.Abs(mateDelta) < 90f)
+                {
+                    float crowd = Mathf.InverseLerp(crowdDistance, crowdDistance * 0.6f, dist);
+                    halfAngle = Mathf.Lerp(halfAngle, 90f, crowd);
+                }
+
+                // Already pointing through them: steer for the nearest way out rather than giving up.
+                if (Mathf.Abs(mateDelta) < halfAngle) mateAcross = true;
+
+                // One rule inside the band or outside it: stay on the side we are already on, no closer than the edge.
+                float edge = halfAngle + _bladeMargin;
+
+                if (mateDelta > 0f) limit = Mathf.Min(limit, mateDelta - edge);
+                else                limit = Mathf.Max(limit, mateDelta + edge);
+            }
+
+            float heading = current + limit;
+            _lastAimClamped = heading;
+            return heading;
+        }
+
+        // Whether a squadmate stands in the blade's band right now. Gates the start of a swing.
+        private bool MateInBladeBand(BotController self, BotPose pose)
+        {
+            if (_gateRadius <= 0f) return false;
+
+            float blade = pose.Heading + BladeBearing;
+            FactionCountry? ours = self.Bot.Faction;
+            float selfY = self.Position is Vector3 selfPos ? selfPos.y : 0f;
+            var bots = BotManager.Bots;
+
+            for (int i = 0; i < bots.Count; i++)
+            {
+                BotController mate = bots[i];
+                if (mate.PlayerId == self.PlayerId) continue;
+
+                FactionCountry? theirs = mate.Bot.Faction;
+                if (ours != null && theirs != null && theirs != ours) continue;
+
+                if (!(mate.Position is Vector3 p)) continue;
+
+                if (Mathf.Abs(p.y - selfY) > MateVerticalReach) continue;   // out of the engine's vertical window
+
+                Vector2 toMate = new Vector2(p.x, p.z) - pose.Position;
+                float dist = toMate.magnitude;
+                if (dist < 1e-4f || dist > BladeReach + _gateRadius) continue;
+
+                // Deliberately narrower than the clamp and with no crowding rule: this is the one that costs stabs.
+                float halfAngle = MateConeHalfWidth(_gateRadius, dist, floored: false) + _bladeMargin;
+
+                if (Mathf.Abs(Mathf.DeltaAngle(blade, MovementSolver.HeadingOf(toMate))) < halfAngle) return true;
+            }
+
+            return false;
+        }
+
+        // Whether aiming at the target would put the blade through a mate. Catches a target in line with one.
+        private bool TargetBehindMate(BotController self, BotPose pose, Vector2 aimPos)
+        {
+            if (_gateRadius <= 0f) return false;
+
+            // From the aim point, not the target: AimOffset already shifts the aim to centre the offset blade.
+            float blade = MovementSolver.HeadingTo(pose.Position, aimPos) + BladeBearing;
+
+            FactionCountry? ours = self.Bot.Faction;
+            float selfY = self.Position is Vector3 selfPos ? selfPos.y : 0f;
+            var bots = BotManager.Bots;
+
+            for (int i = 0; i < bots.Count; i++)
+            {
+                BotController mate = bots[i];
+                if (mate.PlayerId == self.PlayerId) continue;
+
+                FactionCountry? theirs = mate.Bot.Faction;
+                if (ours != null && theirs != null && theirs != ours) continue;
+
+                if (!(mate.Position is Vector3 p)) continue;
+
+                if (Mathf.Abs(p.y - selfY) > MateVerticalReach) continue;   // out of the engine's vertical window
+
+                Vector2 toMate = new Vector2(p.x, p.z) - pose.Position;
+                float dist = toMate.magnitude;
+                if (dist < 1e-4f || dist > BladeReach + _gateRadius) continue;
+
+                float halfAngle = MateConeHalfWidth(_gateRadius, dist, floored: false) + _bladeMargin;
+
+                if (Mathf.Abs(Mathf.DeltaAngle(blade, MovementSolver.HeadingOf(toMate))) < halfAngle) return true;
+            }
+
+            return false;
+        }
+
+        // One line per tick while a swing is live, for the probe.
+        private string DescribeMates(BotController self, BotPose pose)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            FactionCountry? ours = self.Bot.Faction;
+            float selfY = self.Position is Vector3 selfPos ? selfPos.y : 0f;
+            var bots = BotManager.Bots;
+
+            for (int i = 0; i < bots.Count; i++)
+            {
+                BotController mate = bots[i];
+                if (mate.PlayerId == self.PlayerId) continue;
+
+                FactionCountry? theirs = mate.Bot.Faction;
+                if (ours != null && theirs != null && theirs != ours) continue;
+                if (!(mate.Position is Vector3 p)) continue;
+
+                Vector2 toMate = new Vector2(p.x, p.z) - pose.Position;
+                float dist = toMate.magnitude;
+                if (dist < 1e-4f) continue;
+                bool tooHigh = Mathf.Abs(p.y - selfY) > MateVerticalReach;
+
+                sb.Append(" | mate=").Append(mate.PlayerId)
+                  .Append(" d=").Append(dist.ToString("0.00"))
+                  // Off the blade, matching what the clamp compares, so a held swing and its reason line up.
+                  .Append(" off=").Append(Mathf.DeltaAngle(pose.Heading + BladeBearing, MovementSolver.HeadingOf(toMate)).ToString("0.#"))
+                  .Append(" half=").Append(MateConeHalfWidth(_clampRadius, dist, floored: true).ToString("0.#"))
+                  .Append(dist > BladeReach + _clampRadius ? " outOfReach" : "")
+                  .Append(tooHigh ? " outOfHeight" : "");
+            }
+
+            return sb.ToString();
+        }
+
         private Vector2 Separation(BotController self, BotPose pose)
         {
             _separationNeighbours.Clear();
@@ -728,8 +878,38 @@ namespace MDS.Systems
             return (target.PlayerObject.transform.position - wardPos).sqrMagnitude <= _guardRange * _guardRange;
         }
 
-        // Escort posture: hold station near the ward, guard down, no attacks, facing the way they face so the bot
-        // reads as part of their line rather than staring at them.
+        // Whether the bayonet is still out. Every early exit re-aims the bot, which would sweep a live blade.
+        private bool BladeLive(float now) => _attackPhase == AttackPhase.Chamber || now < _bladeLiveUntil;
+
+        // The game's baked strike geometry, keyed by the pitch chunks it uses. SetPitch speaks this scale.
+        private static readonly float[] PitchKeys   = { -1.5f, -1f,   -0.7f, -0.5f, 0f,    0.5f,  1f,    1.25f, 1.5f,  2f    };
+        private static readonly float[] HighBearing = { 16.5f, 15.7f, 15.3f, 15.3f, 16.6f, 20.5f, 26.6f, 30.2f, 34f,   41.8f };
+        private static readonly float[] HighReach   = { 2.04f, 2.09f, 2.11f, 2.11f, 2.04f, 1.87f, 1.71f, 1.64f, 1.59f, 1.52f };
+        private static readonly float[] LowBearing  = { 22.3f, 18.9f, 17.1f, 16.1f, 15.6f, 17.3f, 20.1f, 21.6f, 23f,   25.6f };
+        private static readonly float[] LowReach    = { 1.86f, 1.96f, 2.03f, 2.06f, 2.09f, 2.01f, 1.92f, 1.88f, 1.84f, 1.78f };
+
+        // Averaged across both stab directions, because the release gate must judge before one is picked.
+        private void RefreshBladeGeometry()
+        {
+            BladeBearing = 0.5f * (Sample(HighBearing, _aimPitch) + Sample(LowBearing, _aimPitch));
+            BladeReach   = 0.5f * (Sample(HighReach,   _aimPitch) + Sample(LowReach,   _aimPitch));
+        }
+
+        // Linear between the two nearest chunks, flat outside the table's ends. The ends are past anything a bot
+        // would aim at, and the game clamps there too.
+        private static float Sample(float[] values, float pitch)
+        {
+            if (pitch <= PitchKeys[0]) return values[0];
+
+            for (int i = 1; i < PitchKeys.Length; i++)
+            {
+                if (pitch > PitchKeys[i]) continue;
+                return Mathf.Lerp(values[i - 1], values[i], Mathf.InverseLerp(PitchKeys[i - 1], PitchKeys[i], pitch));
+            }
+
+            return values[values.Length - 1];
+        }
+
         private BotIntent GuardIntent(BotController self, BotPose pose, IPlayer ward)
         {
             AbandonChamber(); // don't carry a chamber into the lull
@@ -737,9 +917,15 @@ namespace MDS.Systems
             Transform wardTransform = ward.PlayerObject.transform;
             Vector2 wardPos = new Vector2(wardTransform.position.x, wardTransform.position.z);
 
+            // Same rule as the idle path: a guard whose enemy dies mid-thrust must not spin to face its ward
+            // with the blade still out, or the ward is who it runs through. See BladeLive.
+            float now = Time.realtimeSinceStartup;
+            float lookHeading = BladeLive(now) ? pose.Heading : wardTransform.eulerAngles.y;
+
             var intent = new BotIntent
             {
-                LookHeading = wardTransform.eulerAngles.y,
+                LookHeading = lookHeading,
+                LookPitch = _aimPitch,
                 MoveAxis = ToAxis(pose, WithSeparation(self, pose, HoldRangeVelocity(pose, wardPos, _guardFollowRange, pursue: true))),
             };
 
@@ -756,13 +942,7 @@ namespace MDS.Systems
         // and fall back to auto-acquiring the nearest enemy.
         public void SetTarget(int? playerId) => _assignedTargetId = playerId;
 
-        // Target resolution, in priority order:
-        //  1. External pin (ITargetableAi), a supervisor's explicit choice, wins while it's a live candidate.
-        //  2. Attacker-lock: once a candidate begins a strike we lock onto it through the exchange plus a tail that
-        //     covers our riposte, regardless of who's now closer, so we don't get pulled off an attacker.
-        //  3. Sticky: keep the current target while it's still a valid candidate.
-        //  4. Otherwise the nearest candidate (used when stickyTarget is off, re-picking the closest in range).
-        // A candidate is a spawned, living other player, filtered by team (unless ignoreTeam) and by targetRange.
+        // Target resolution: external pin, then attacker-lock, then sticky, then nearest.
         private IPlayer ResolveTarget(BotController self, float now)
         {
             if (_assignedTargetId is int pinned)
@@ -779,9 +959,7 @@ namespace MDS.Systems
             if (_engageOnAttack)
                 return ResolveEngageOnAttack(self, now);
 
-            // Attacker-lock. Hold it (ignoring range and closest) while live and unexpired, refreshing while that
-            // player is still striking. Don't acquire a new lock mid-own-swing, so we finish our stab on the
-            // current target instead of hopping aim to a new attacker.
+            // Attacker-lock: hold it while live, so the bot cannot be pulled off someone mid-strike.
             if (_lockTargetId is int locked)
             {
                 IPlayer lp = StateTracker.GetPlayerById(locked);
@@ -819,12 +997,7 @@ namespace MDS.Systems
             return nearest;
         }
 
-        // engageOnAttack targeting (Dueling). While passive it faces and blocks the nearest candidate within
-        // targetRange but doesn't fight (Decide gates press/riposte/pursue off). It engages only the player whose
-        // attack our guard actually blocks, a hit aimed at us, rather than anyone swinging within range, which
-        // would grab players from other fights. Once engaged it locks that attacker and fights until it dies,
-        // tracked regardless of range, then drops back to passive. _engaged is runtime only (not inherited), so a
-        // Replace replacement starts passive again.
+        // engageOnAttack: passive until a player's attack is blocked, then locked to that attacker.
         private IPlayer ResolveEngageOnAttack(BotController self, float now)
         {
             if (_engaged && _engagedTargetId is int et)
@@ -867,9 +1040,7 @@ namespace MDS.Systems
         // How long an attacker-lock outlives the strike: long enough to land our riposte (reaction plus window plus a beat).
         private float LockTail => _riposteReactionMax + _riposteWindow + 0.3f;
 
-        // Closest candidate currently mid-strike (winding up or in a committed lethal window) within lock range, or
-        // null. Lock range is targetRange, or StrikerLockRange when targeting is unlimited so a distant swing at
-        // someone else can't grab us. Once locked, the lock holds on regardless of range (see ResolveTarget).
+        // Closest candidate currently mid-strike.
         private IPlayer FindNearestStriker(BotController self, float now)
         {
             if (!(self.Position is Vector3 selfPos)) return null;
@@ -968,11 +1139,13 @@ namespace MDS.Systems
         public SquadSettings SquadSettings => new SquadSettings
         {
             Spacing = _squadSpacing,
+            SpacingVariance = _squadSpacingVar,
             LaneHalfWidth = _laneHalfWidth,
             Standoff = _squadStandoff,
             Post = _post,
             Breakoff = _breakoff,
             BreakoffRange = _breakoffRange,
+            EngageDelay = _engageDelay,
             ResetRange = _resetRange,
             MinMembers = _minMembers,
             ReturnDelay = _returnDelay,
@@ -981,10 +1154,7 @@ namespace MDS.Systems
         // Read by BotManager when this bot dies, to decide whether its replacement waits for the bout to finish.
         public bool HoldReplacement => _holdReplacement;
 
-        // Only a real provocation counts, never merely having someone to look at: a waiting bot faces and blocks
-        // the nearest player, so reporting that would wake a whole station at anyone who walked past. Presets with
-        // engageOnAttack have already resolved this into an engagement; the rest fall back to the raw block, which
-        // is the same signal ResolveEngageOnAttack reads.
+        // Only a real provocation counts, never merely having someone to look at.
         public int? ProvokedBy => _engaged ? _engagedTargetId : _provokedBy;
 
         // Woken by a squadmate being provoked. This is the same state a bot reaches by being stabbed itself, so
@@ -1003,6 +1173,12 @@ namespace MDS.Systems
             _engaged = false;
             _engagedTargetId = null;
             _provokedBy = null;   // spent; leaving it set would re-wake the station the instant it got home
+
+            // Consume the block record too, or a hit landing moments earlier re-provokes on the very next tick.
+            _lastProvokeBlock = CombatTracker.LastBlockTime(_selfId);
+            _lastEngageBlock = _lastProvokeBlock;
+            _lastConsumedBlock = _lastProvokeBlock;
+
             AbandonChamber();
         }
 
@@ -1015,9 +1191,7 @@ namespace MDS.Systems
             CopyLeversFrom(p);                       // every lever, including guardTarget (see MeleeAi.Levers.cs)
             _assignedTargetId = p._assignedTargetId;  // a standing order to fight someone outlives the bot
 
-            // Deliberately NOT carried: _engaged / _engagedTargetId / _provokedBy. Being provoked is something a
-            // bot earns, so a replacement starts passive rather than resuming a fight it was never in. A station
-            // still pulls it straight back in, because SquadCoordinator re-asserts the group's target every tick.
+            // Deliberately not carried: engagement and provocation. A replacement starts passive.
             RollHoldRange();
         }
     }
