@@ -30,8 +30,8 @@ rc openmelee 2 7
 ```
 rc bot spawn 5 French ArmyLineInfantry
 rc bot summon French ArmyLineInfantry None Replace
-rc bot summonAt 42 Dueling
-rc bot setBotAi all Dueling
+rc bot summonAt 42 Sparring
+rc bot setBotAi all Sparring
 rc bot cfg 42 stabInterval 2.5
 rc bot move all seek me
 rc bot remove all
@@ -316,7 +316,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
   ```
   rc bot summonAt 42
   rc bot summonAt 42 French ArmyLineInfantry
-  rc bot summonAt 42 Defending ArmyLineInfantry Dueling Replace
+  rc bot summonAt 42 Defending ArmyLineInfantry Sparring Replace
   ```
 * **Bodyguards:** summoning the `Guardian` AI this way makes the target the player it guards, so repeating the command builds an escort around them.
 
@@ -331,11 +331,11 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 
 * Sets the AI behaviour for one or more tracked bots immediately.
 * **Target:** `all`, `attacking`, `defending`, `<faction>` (e.g. `French`), or `<playerId>`
-* **AI types:** `None`, `Manual`, `StabbingDummy`, `RiposteDummy`, `Dueling`, `Group`, `Guardian`, `Test`: see **[Bot AI Types](#bot-ai-types)**.
+* **AI types:** `None`, `Manual`, `StabbingDummy`, `RiposteDummy`, `Sparring`, `Dueling`, `Group`, `Guardian`, `Test`: see **[Bot AI Types](#bot-ai-types)**.
 * **Examples:**
 
   ```
-  rc bot setBotAi all Dueling
+  rc bot setBotAi all Sparring
   rc bot setBotAi French RiposteDummy
   rc bot setBotAi 42 StabbingDummy
   ```
@@ -422,7 +422,7 @@ All bot subcommands are accessed via `rc bot <subcommand> [args]`.
 * With `<lever> <value>`: set it on the matching bots. Without: list their current levers.
 * Levers held dormant by a switched-off lever are listed after `| inactive:`, tagged with what they wait on,
   e.g. `breakoffRange=6(needs breakoff)`. Setting a dormant lever is allowed and takes effect when its gate opens.
-* Only affects bots whose AI is configurable (`StabbingDummy`, `RiposteDummy`, `Dueling*`, `Group*`).
+* Only affects bots whose AI is configurable (`StabbingDummy`, `RiposteDummy`, `Sparring*`, `Group*`).
 * **Examples:**
 
   ```
@@ -454,10 +454,12 @@ Assign with `rc bot setBotAi <target> <ai>`, inline when spawning (e.g. `rc bot 
 | `RiposteDummy` | Stands its ground, blocks, and only counters once provoked. Never throws first. |
 | `Guardian` | Escorts whoever summoned it. Holds station beside them and fights only what comes within `guardRange`. |
 | `Test` | Current development testing settings. |
-| `DuelingEasy` / `DuelingNormal` / `Dueling` | Duelling practice. Passive until a player's attack is blocked, then locks onto that attacker and fights to the death. The tiers differ only in reaction speed. Several attacked by one player form up so they stop crowding each other. |
+| `SparringEasy` / `SparringNormal` / `Sparring` | Duelling practice. Passive until a player's attack is blocked, then locks onto that attacker and fights to the death. The tiers differ only in reaction speed. Several attacked by one player form up so they stop crowding each other. |
+| `Dueling` | `Sparring`'s reads with offence on top. **Holds a stab against a raised guard** and throws the instant the guard drops or the opponent starts their own, so sitting on a block is punished rather than rewarded. Which chambers it holds, and which dropped guards it believes, come from a read on how you have played this duel: see **[Reading the opponent](#reading-the-opponent)**. Feints, spins and gambles still to come. |
+| `Feinting` | Feint sandbox, not a difficulty. `Dueling` with holding switched off so feint timings can be measured on their own. Cancels its own windup with a block and queues the attack again, `feintCount` times, before throwing for real. See **[Feinting](#feinting)**. |
 | `GroupEasy` / `GroupNormal` / `Group` / `GroupHard` | Drill station for 1vXs. Provoking any one wakes all of them; they give ground, re-form, fight as a line, and return to post. See **[Group drill stations](#group-drill-stations)**. `GroupHard` is `Group` with spaced updowns, so they can be blocked one at a time. |
 
-`RiposteDummy` and the `Dueling` and `Group` tiers are presets of one configurable melee AI: the same behaviour with different capability toggles (`press`, `riposte`, `move`, `pursue`, `engageOnAttack`, `squad`, `post`) and tuning. `StabbingDummy` is a separate static-stabber AI. You can tweak any of them per bot with `rc bot cfg`.
+`RiposteDummy` and the `Sparring` and `Group` tiers are presets of one configurable melee AI: the same behaviour with different capability toggles (`press`, `riposte`, `move`, `pursue`, `engageOnAttack`, `squad`, `post`) and tuning. `StabbingDummy` is a separate static-stabber AI. You can tweak any of them per bot with `rc bot cfg`.
 
 ### Group drill stations
 
@@ -493,12 +495,72 @@ once re-formed, you die or leave, or ten seconds pass. Waiting, backing off, sta
 **Stations without a group.** `post` is independent of `squad`, so a single bot of any melee preset can hold one:
 
 ```
-rc bot summon Defending ArmyLineInfantry Dueling Replace
+rc bot summon Defending ArmyLineInfantry Sparring Replace
 rc bot cfg <id> post true
 rc bot cfg <id> breakoff true
 ```
 
 That is a 1v1 sparring partner that waits on its mark, resets distance when attacked, and walks back afterwards.
+
+### Reading the opponent
+
+A `Dueling` bot keeps a read on the player it is fighting and uses it for two decisions:
+
+- **Whether to hold this chamber at all**, or throw on the fixed beat like every other AI. It scores its own
+  holds: one you break early, by dropping guard or attacking into it, paid off, and one that runs the full
+  `holdMax` against your raised guard did not. Turtle against it and it stops holding on you.
+- **Whether a dropped guard is an opening or a bait.** If your drops during a hold keep turning into a re-block,
+  it stops taking them and waits you out instead.
+
+- **Which way to re-chamber after a feint**, keeping the direction or switching it. It scores both against
+  whether the stab that followed actually got through, so a player who has worked out that a feint always
+  switches stops being handed that.
+- **Whether a feint too long for the distance is shortened or aimed wide**, scored the same way.
+
+Both are odds, not rules. A read that is certain still leaves the bot throwing against type now and then, so
+there is no single line that beats it every time.
+
+The read covers one duel. It is built from scratch when the bot picks a new target, and it is gone when the bot
+dies. Nothing carries between rounds or between sessions.
+
+`rc bot probe <id>` prints a `MeleeHold` line per released hold, carrying how long it was held, what ended it,
+and both live rates. A `released=noHold` line is a chamber the read decided to throw straight.
+
+### Feinting
+
+A `Feinting` bot throws a real stab, cancels it in flight with a block before it can land, and attacks again.
+The stab is genuine, so it has to be respected, and cancelling it this way costs none of the recovery a
+completed stab does. It exists to measure the timings, so the three levers are the whole behaviour:
+
+```
+rc bot summon Defending ArmyLineInfantry Feinting Replace
+rc bot cfg <id> feintCount 2
+rc bot cfg <id> feintDepth 0.2
+rc bot cfg <id> feintDwell 0.15
+```
+
+The cancel matches what a player is physically forced to do: hold the block for `feintDwell`, release it, then
+attack again. A player cannot change attack direction without blocking first, and going straight from block to
+attack interrupts the block pose before it plays, so the feint becomes invisible however long the block is held.
+
+**Distance decides how long a feint can be.** A stab aimed at the player has to be pulled back before the blade
+gets there, so the closer the bot stands the shorter its feints. When `feintDepth` asks for more than the
+distance allows, the bot chooses: shorten the stab and keep it aimed, or aim it wide on purpose and hold it out
+for the full length. A wide one cannot land at all, which is what buys the extra time.
+
+If a feinted stab is cancelled too late and lands on your guard, the bot knows it has lost priority: it drops
+the chain and gets its guard up for your riposte rather than carrying on.
+
+`feintDepth` is the dial between the two kinds of feint: short pulls the stab back early, long leaves it out
+until the last moment so you have to commit to a block. Too long and the stab lands instead of being cancelled,
+which is the boundary worth finding for a given weapon.
+
+The cancel is deliberately as fast as the tick allows: the re-chamber ends the block itself rather than lowering
+it first, so no guard-lowering command goes out and nothing waits on the usual minimum guard hold. If you are
+actually attacking when the cancel ends, the bot keeps the guard up for real and finishes the feint afterwards.
+
+`rc bot probe <id>` prints a `MeleeFeint` line per cancel. Read it alongside the `MeleeProbe` action echo, which
+timestamps what the engine actually received.
 
 ### Configurable AI levers
 
@@ -525,20 +587,20 @@ rc bot cfg <id> stabInterval 3
 rc bot cfg <id> stabDirection High
 ```
 
-**`RiposteDummy` / `Dueling*` levers**
+**`RiposteDummy` / `Sparring*` levers**
 
-`RiposteDummy` and the `Dueling` and `Group` difficulty tiers are presets of one melee AI and share the same levers. Within each family the tiers are identical except for their reaction speeds, and the `Group` tiers are the `Dueling` tiers plus `squad` and `post`. Booleans are `true`/`false` (`on`/`off` still accepted as input).
+`RiposteDummy` and the `Sparring` and `Group` difficulty tiers are presets of one melee AI and share the same levers. Within each family the tiers are identical except for their reaction speeds, and the `Group` tiers are the `Sparring` tiers plus `squad` and `post`. Booleans are `true`/`false` (`on`/`off` still accepted as input).
 
-**Toggles & targeting** (the `Dueling` and `Group` tiers share one column):
+**Toggles & targeting** (the `Sparring` and `Group` tiers share one column):
 
-| Setting | `RiposteDummy` | `Dueling*` / `Group*` | Meaning |
+| Setting | `RiposteDummy` | `Sparring*` / `Group*` | Meaning |
 | --- | --- | --- | --- |
 | `press` | `false` | `true` | Throw the first blow when the enemy isn't threatening. |
 | `riposte` | `true` | `true` | Counter after the guard absorbs a hit. |
 | `move` | `false` | `true` | Hold/adjust melee spacing vs. stand its ground. |
 | `pursue` | `false` | `true` | Advance toward a target that is too far. `false` lets a player back away and disengage. |
 | `stickyTarget` | `false` | `false` | Keep one target while valid, versus re-picking the closest each tick. |
-| `targetRange` | `3` | `3` | Only engage players within this many metres, `0` = unlimited. For the `Dueling` tiers this is also the passive read range. |
+| `targetRange` | `3` | `3` | Only engage players within this many metres, `0` = unlimited. For the `Sparring` tiers this is also the passive read range. |
 | `engageOnAttack` | `false` | `true` | Start passive and engage only a player whose attack it blocks, fighting that target until it dies. |
 
 **Difficulty** comes in two halves: reaction beats (how fast a bot answers you) and formation levers `coordinate`, `slotError` and `formationLag` (how well it holds its place beside another bot). The second half matters more in a group. Reactions alone give you a slow pair that still stands in a perfect line and throws perfectly opposite stabs.
@@ -547,11 +609,12 @@ Every formation lever is **the worst a bot may be, not how bad it is**. Each rol
 
 **Reaction beats**: the levers that separate the tiers (`seconds ≥ 0`).
 
-The `Dueling` and `Group` families have separate ladders.
+The `Sparring` and `Group` families have separate ladders.
 
-*Dueling family, plus the two standalone presets:*
+*Sparring family, plus the two standalone presets. `Dueling` reads exactly as `Sparring` does and has no column
+of its own until it gains levers of its own:*
 
-| Lever | `Guardian` | `RiposteDummy` | `DuelingEasy` | `DuelingNormal` | `Dueling` | Meaning |
+| Lever | `Guardian` | `RiposteDummy` | `SparringEasy` | `SparringNormal` | `Sparring` | Meaning |
 | --- | --- | --- | --- | --- | --- | --- |
 | `blockReactionMin` | `0.5` | `0.1` | `0.3` | `0.1` | `0` | Min delay between reading an attack and raising the guard. The main difficulty knob. |
 | `blockReactionMax` | `0.8` | `0.2` | `0.5` | `0.2` | `0` | Max of that delay; each block rolls between min and max. |
@@ -585,7 +648,7 @@ presets unless the Default column says otherwise (`seconds >= 0` or `metres`, fl
 | `defensiveRangeVariance` | `0.4` | Random jitter added on top of `defensiveRange`. |
 | `attackRange` | `2.0` | How close a press attack commits a stab. A riposte ignores this. |
 | `riposteWindow` | `0.6` | How long the post-block counter stays available (seconds). |
-| `passiveRange` | `0.6` | `Dueling` tiers: hold distance while waiting. Uses `defensiveRange` once engaged. |
+| `passiveRange` | `0.6` | `Sparring` tiers: hold distance while waiting. Uses `defensiveRange` once engaged. |
 | `passiveBlockReaction` | `0` | Block reaction beat while waiting to be provoked, instead of `blockReactionMin`/`Max`. Not randomised. |
 
 **Targeting**
@@ -605,22 +668,28 @@ The rest of the targeting set (`targetRange`, `stickyTarget`, `engageOnAttack`) 
 | `guardTarget` | `0` | The player id this bot escorts, `0` for none. Set automatically by the summon commands. |
 | `guardRange` | `10` | An enemy this close to the guarded player pulls the bot into the fight. |
 | `guardFollowRange` | `3` | `Guardian`: how far from the guarded player the bot holds station while nothing is happening. |
-| `separationRange` | `0.8` for `Dueling*` / `Group*` / `Test`, `1.5` for `Guardian`, `0` otherwise | Push apart from other bots within this many metres. `0` disables. |
+| `separationRange` | `0.8` for `Sparring*` / `Group*` / `Test`, `1.5` for `Guardian`, `0` otherwise | Push apart from other bots within this many metres. `0` disables. |
 
 **Formation**
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `squad` | `true` for `Dueling*` / `Group*` / `Test`, `false` otherwise | Stand in a formation with the rest of the spawn batch, and with any other engaged batch on the same player. Spacing and lane discipline only. |
-| `coordinate` | `0`–`1`. `0.5` neutral, and the `Dueling*` default. `Group*`: `0.97` Easy, `0.98` Normal, `1` top | The updown axis, decided per swing. `1` always throws opposite to the neighbour, `0` always the same, `0.5` a free pick. Above `0.5` also shares the guard. Needs `squad`. |
-| `slotError` | `0.9` DuelingEasy, `0.5` DuelingNormal / GroupEasy / GroupNormal, `0.1` GroupHard, `0` Dueling and Group | The furthest a bot may stand from its place on the ring, in metres. Re-rolled every few seconds. Needs `squad`. |
-| `formationLag` | `1.2` DuelingEasy, `0.6` DuelingNormal, `0.2` GroupEasy, `0` GroupNormal and top tiers | The longest a bot may work from a stale slot, in seconds. `0` tracks perfectly. Needs `squad`. |
+| `squad` | `true` for `Sparring*` / `Group*` / `Test`, `false` otherwise | Stand in a formation with the rest of the spawn batch, and with any other engaged batch on the same player. Spacing and lane discipline only. |
+| `coordinate` | `0`–`1`. `0.5` neutral, and the `Sparring*` default. `Group*`: `0.97` Easy, `0.98` Normal, `1` top | The updown axis, decided per swing. `1` always throws opposite to the neighbour, `0` always the same, `0.5` a free pick. Above `0.5` also shares the guard. Needs `squad`. |
+| `slotError` | `0.9` SparringEasy, `0.5` SparringNormal / GroupEasy / GroupNormal, `0.1` GroupHard, `0` Sparring and Group | The furthest a bot may stand from its place on the ring, in metres. Re-rolled every few seconds. Needs `squad`. |
+| `formationLag` | `1.2` SparringEasy, `0.6` SparringNormal, `0.2` GroupEasy, `0` GroupNormal and top tiers | The longest a bot may work from a stale slot, in seconds. `0` tracks perfectly. Needs `squad`. |
 | `stabSeparation` | `0.35` GroupEasy, `0.25` GroupNormal, `0.15` GroupHard, `0` elsewhere | Smallest gap between two opposite stabs from one formation. `0` leaves them unblockable. Needs `squad`. |
 | `aimPitch` | `0` | Vertical aim in the engine's pitch scale, `0` level and negative down. Blade geometry follows it automatically. |
+| `holdMax` | `0`; `Dueling`: `2.5` | Longest a chambered stab is kept back waiting for the enemy to move, in seconds. The bot only holds against a **raised guard**, and throws the moment it drops or they start a windup, so the hold is a read rather than a delay. Whether a given chamber is held at all, and whether a dropped guard is taken or read as a bait, is decided per opponent from how they have been playing this duel: see [Reading the opponent](#reading-the-opponent). `0` = throw on the fixed beat, which is what every other preset does. |
+| `holdMin` | `0.8` | Shortest a hold lasts once begun, in seconds. Without it the bot reads a player who is still raising their guard as unguarded and throws into the gap, so the hold never happens. A windup from the enemy still releases the stab immediately. A hold also never bails into a guard: it answers a new attack by releasing, not by blocking. A feint from the enemy still throws on the fixed beat, since that opening is the one worth taking now. Inert while `holdMax` is `0`. |
+| `feintCount` | `0`; `Feinting`: `1` | How many thrown stabs are cancelled in flight before one is allowed to land. `0` = never feint, which is every preset but `Feinting`. |
+| `feintDepth` | `0.2` | The longest a stab is left in flight before the block kills it, in seconds, measured from the moment it is thrown. Small values pull the stab back early; large ones leave it out until the last moment, so the defender has to respect it. This is a **maximum**: a stab aimed at the player is shortened to whatever the current distance allows, since the blade needs time to get there. Asking for more than that fits is what makes the bot consider a long feint. Inert while `feintCount` is `0`. |
+| `feintDwell` | `0.1` | How long the cancelling block is held before it is released, in seconds. This is the block pose the opponent actually reads, so it is also the dial for making a bot slower and easier to train against: `0.15` to `0.2` are both good. Inert while `feintCount` is `0`. |
 | `squadSpacing` | `0.85` | The tightest the line ever stands, and the floor its breathing works up from. |
 | `squadSpacingVariance` | `0.7`; `Group*`: `0.5` Easy, `0.3` Normal, `0.1` Hard, `0` Group | How much wider than `squadSpacing` the line may drift mid-fight. Only while engaged; a posted line settles back to the floor. `0` = a fixed gap. Needs `squad`. |
 | `laneHalfWidth` | `0.5` | How close a squadmate may be to the swing line before the shot counts as blocked. Keep it under `squadSpacing`. |
-| `squadStandoff` | `1.5` | Range the formation's point holds from the enemy. `1.5` is the practical ceiling. |
+| `squadStandoff` | `1.5` | Range the whole line holds from the enemy, measured from its ends rather than its middle, so a wider formation stands its point that much closer. `1.5` is the practical ceiling. |
+| | | Only as many as fit hold the line: 3 at the defaults, following `squadStandoff` and `squadSpacing`. The rest close to the same range from whichever side they are already on, with a wider and stronger push off their mates, so they spread into a **ring** around the enemy and can flank or take them from behind. No bearing is assigned; the ring is what the pushback settles into. The nearest hold the line, so running through a formation swaps who is in front. |
 
 **Mate avoidance**
 
@@ -640,7 +709,7 @@ How a bot keeps its own bayonet off the squadmate beside it.
 
 | Lever | Default | Meaning |
 | --- | --- | --- |
-| `post` | `true` for `Dueling*` / `Group*` / `Test`, `false` otherwise | Make it a drill station: wait on the mark, and walk back afterwards. Independent of `squad`. |
+| `post` | `true` for `Sparring*` / `Group*` / `Test`, `false` otherwise | Make it a drill station: wait on the mark, and walk back afterwards. Independent of `squad`. |
 | `breakoff` | `false` (`true` for `Group*`) | Once provoked, give ground and re-form before throwing anything. Needs `post`. |
 | `breakoffRange` | `2` | Ground given once, in metres, measured from where the group was provoked rather than held from the player. Needs `breakoff`. |
 | `engageDelay` | `0` (`1.5` for `Group*`) | Seconds from the first provocation before the group may swing or counter. It blocks throughout. Needs `post`. |
@@ -698,7 +767,7 @@ How a bot keeps its own bayonet off the squadmate beside it.
   * **default:** `90` (NorthSouth)
 * **botDefaultAi**: Default AI behaviour assigned to bots that do not specify one inline.
 
-  * **args:** `None | Manual | StabbingDummy | RiposteDummy | DuelingEasy | DuelingNormal | Dueling | GroupEasy | GroupNormal | Group | Guardian | Test` (see [Bot AI Types](#bot-ai-types))
+  * **args:** `None | Manual | StabbingDummy | RiposteDummy | SparringEasy | SparringNormal | Sparring | Dueling | GroupEasy | GroupNormal | Group | Guardian | Test` (see [Bot AI Types](#bot-ai-types))
   * **default:** `None`
 * **botDefaultDeathPolicy**: Default death policy assigned to bots that do not specify one inline.
 
@@ -760,7 +829,7 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
 ### Bot
 
-* **SetBotDefaultAi**: `None | Manual | StabbingDummy | RiposteDummy | DuelingEasy | DuelingNormal | Dueling | GroupEasy | GroupNormal | Group | Guardian | Test`
+* **SetBotDefaultAi**: `None | Manual | StabbingDummy | RiposteDummy | SparringEasy | SparringNormal | Sparring | Dueling | GroupEasy | GroupNormal | Group | Guardian | Test`
 * **SetBotDefaultDeathPolicy**: `None | Kick | Replace`
 * **SetBotKickDelay**: `seconds(float)`
 * **SetBotReplaceDelay**: `seconds(float)`
@@ -787,7 +856,7 @@ Use **global** `mod_variable` or **per‑map** `mod_variable_local` to set MDS o
 
   ```
   mod_variable_local MDS:SpawnBot:-20,30,90
-  mod_variable_local MDS:SpawnBot:12,-4,180,defending,ArmyLineInfantry,Dueling,Replace
+  mod_variable_local MDS:SpawnBot:12,-4,180,defending,ArmyLineInfantry,Sparring,Replace
   ```
 
 ### Line
@@ -834,12 +903,12 @@ mod_variable_local MDS:SetOpenMeleeOffset:7
 mod_variable_local MDS:SetOrientation:NorthSouth
 
 # Bots
-mod_variable_local MDS:SetBotDefaultAi:Dueling
+mod_variable_local MDS:SetBotDefaultAi:Sparring
 mod_variable_local MDS:SetBotDefaultDeathPolicy:Replace
 mod_variable_local MDS:SetBotKickDelay:2
 mod_variable_local MDS:SetBotReplaceDelay:0.5
 mod_variable_local MDS:SetGlobalAi:StabbingDummy,stabInterval,2.5
-mod_variable_local MDS:SpawnBot:0,0,90,defending,ArmyLineInfantry,Dueling,Replace
+mod_variable_local MDS:SpawnBot:0,0,90,defending,ArmyLineInfantry,Sparring,Replace
 mod_variable_local MDS:SpawnLine:-20,30,90,10,attacking,ArmyLineInfantry
 mod_variable_local MDS:SpawnLine:20,30,270,10,defending,ArmyLineInfantry,None,Replace,Bot,None,1
 ```

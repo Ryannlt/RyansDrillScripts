@@ -20,6 +20,10 @@ namespace MDS.Systems
         // The heading this bot was asked to face when placed, which is what its post records.
         public float? SpawnHeading { get; private set; }
         public bool Initialized { get; private set; }
+
+        // Whether the summon or replacement teleport has been issued. Initialized is set the moment the bot
+        // spawns, which is before it has been moved, so it is not on its own enough to count a bot's position.
+        public bool Placed { get; private set; }
         public bool IsAwaitingKick { get; private set; }   // a death-kick is scheduled; ignore further deaths
 
         // Forcing input rotation pins only the heading, so the vertical aim is re-asserted on this cadence.
@@ -85,6 +89,9 @@ namespace MDS.Systems
                 Logger.Log($"Bot {PlayerId} placed at {placement.Position}{(placement.Heading.HasValue ? $" facing {placement.Heading.Value:F0} deg" : "")}.", LogLevel.DEBUG);
                 _pendingPlacement = null;
             }
+
+            // Nothing pending means it stands where it spawned on purpose, so either way it is where it belongs.
+            Placed = true;
         }
 
         // The game does not always spawn the bot we asked for; warn rather than silently running the wrong one.

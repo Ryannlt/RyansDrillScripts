@@ -63,6 +63,13 @@ namespace MDS.Systems
         // Vertical aim in the engine's own pitch scale, 0 level. Drives BladeBearing and BladeReach.
         private float _aimPitch;
 
+        // Longest a chambered stab may be kept back waiting for the enemy to move. 0 = throw on the fixed beat.
+        private float _holdMax;
+        private float _holdMin;           // shortest a hold lasts once begun, so a guard has time to come up
+        private float _feintCount;        // cancels before the stab is thrown for real. 0 = never feint
+        private float _feintDepth;        // seconds into the chamber before it is cancelled
+        private float _feintDwell;        // how long the cancelling block is held before it is released
+
         private float _squadSpacing;      // closest the line ever stands, the floor its breathing works up from
         private float _squadSpacingVar;   // how much wider than that it may drift during a fight, 0 = a fixed gap
         private float _laneHalfWidth;     // how close a squadmate may be to the swing line before it is blocked
@@ -116,6 +123,11 @@ namespace MDS.Systems
                 ("abortOnMate", "false"),
                 // The line breathes between squadSpacing and squadSpacing+Variance; 0.85 is what it can hold moving.
                 ("aimPitch", "0"),   // level, and the only value known to mean the same to the command and the engine
+                ("holdMax", "0"),    // no holding: chamber and throw, which is what every preset but Dueling does
+                ("holdMin", "0.8"),  // inert while holdMax is 0, so turning holding on alone still behaves
+                ("feintCount", "0"), // no feinting: chamber and throw, which is what every preset but Feinting does
+                ("feintDepth", "0.2"), // seconds into the flying stab before the block kills it
+                ("feintDwell", "0.1"),   // block held, then released; also the dial for slowing a bot down
                 ("squadSpacing", "0.85"), ("squadSpacingVariance", "0.7"), ("laneHalfWidth", "0.5"),
                 // The formation's point holds this range from the enemy, so a circling enemy leaves it alone while
                 // one that closes or withdraws tows it along.
@@ -141,15 +153,18 @@ namespace MDS.Systems
                     levers.Add(("ignoreTeam", "false"));
                     levers.Add(("guard", "true"));
                     levers.Add(("separationRange", "1.5"));
-                    // Deliberately a step below DuelingEasy: a guard buys its ward a moment, it does not win the duel.
+                    // Deliberately a step below SparringEasy: a guard buys its ward a moment, it does not win the duel.
                     levers.Add(("blockReactionMin", "0.5")); levers.Add(("blockReactionMax", "0.8"));
                     levers.Add(("riposteReactionMin", "0.4")); levers.Add(("riposteReactionMax", "1.1"));
                     levers.Add(("attackReadBeat", "1.2")); break;
 
-                // Dueling family: passive until a player's attack is blocked, then fights that attacker to the death.
-                case BotAiEnum.DuelingEasy:
-                case BotAiEnum.DuelingNormal:
+                // Sparring and Dueling: passive until a player's attack is blocked, then fight that attacker to
+                // the death. Sparring is the practice ladder; Dueling is the same reads with offence on top.
+                case BotAiEnum.SparringEasy:
+                case BotAiEnum.SparringNormal:
+                case BotAiEnum.Sparring:
                 case BotAiEnum.Dueling:
+                case BotAiEnum.Feinting:
                 case BotAiEnum.GroupEasy:
                 case BotAiEnum.GroupNormal:
                 case BotAiEnum.Group:
@@ -202,7 +217,7 @@ namespace MDS.Systems
                     switch (aiType)
                     {
                         // Difficulty is reaction speed plus how well a line is held. The imperfection levers are ceilings.
-                        case BotAiEnum.DuelingEasy:   // sluggish, and holds a line badly
+                        case BotAiEnum.SparringEasy:   // sluggish, and holds a line badly
                             levers.Add(("blockReactionMin", "0.3")); levers.Add(("blockReactionMax", "0.5"));
                             levers.Add(("riposteReactionMin", "0.2")); levers.Add(("riposteReactionMax", "0.8"));
                             levers.Add(("attackReadBeat", "0.9"));
@@ -210,7 +225,7 @@ namespace MDS.Systems
                             // the gap stays open long enough to use.
                             levers.Add(("slotError", "0.9")); levers.Add(("formationLag", "1.2")); break;
 
-                        case BotAiEnum.DuelingNormal: // human reactions, and human sloppiness
+                        case BotAiEnum.SparringNormal: // human reactions, and human sloppiness
                             levers.Add(("blockReactionMin", "0.1")); levers.Add(("blockReactionMax", "0.2"));
                             levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0.5"));
                             levers.Add(("attackReadBeat", "0.6"));
@@ -241,7 +256,24 @@ namespace MDS.Systems
                             // Just off perfect, so the pair is not in identical relative positions every bout.
                             levers.Add(("slotError", "0.1")); levers.Add(("formationLag", "0")); break;
 
-                        default:                      // Dueling, Group and Test: how it is supposed to be done.
+                        // Sparring's reads, plus offence: holds a stab against a raised guard and throws the
+                        // moment it drops or they start their own, which needs no delay anywhere to be safe.
+                        case BotAiEnum.Dueling:
+                            levers.Add(("blockReactionMin", "0")); levers.Add(("blockReactionMax", "0"));
+                            levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0"));
+                            levers.Add(("attackReadBeat", "0.3"));
+                            levers.Add(("slotError", "0")); levers.Add(("formationLag", "0"));
+                            levers.Add(("holdMax", "2.5")); break;
+
+                        // Feint sandbox: Dueling with holding off, so feint timings are measured on their own.
+                        case BotAiEnum.Feinting:
+                            levers.Add(("blockReactionMin", "0")); levers.Add(("blockReactionMax", "0"));
+                            levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0"));
+                            levers.Add(("attackReadBeat", "0.3"));
+                            levers.Add(("slotError", "0")); levers.Add(("formationLag", "0"));
+                            levers.Add(("feintCount", "1")); break;
+
+                        default:                      // Sparring, Group and Test: how it is supposed to be done.
                             levers.Add(("blockReactionMin", "0")); levers.Add(("blockReactionMax", "0"));
                             levers.Add(("riposteReactionMin", "0")); levers.Add(("riposteReactionMax", "0"));
                             levers.Add(("attackReadBeat", "0.3"));
@@ -276,7 +308,7 @@ namespace MDS.Systems
             "guard", "guardTarget", "guardRange", "guardFollowRange", "separationRange",
             "squad", "coordinate", "slotError", "formationLag", "stabSeparation",
             "gateRadius", "clampRadius", "bladeMargin", "mateConeFloor", "mateCrowdRatio", "gateOnMate", "abortOnMate",
-            "aimPitch", "squadSpacing", "squadSpacingVariance", "laneHalfWidth", "squadStandoff",
+            "aimPitch", "holdMax", "holdMin", "feintCount", "feintDepth", "feintDwell", "squadSpacing", "squadSpacingVariance", "laneHalfWidth", "squadStandoff",
             "post", "breakoff", "breakoffRange", "engageDelay", "resetRange",
             "minMembers", "holdReplacement", "returnDelay"
         };
@@ -297,6 +329,7 @@ namespace MDS.Systems
             { "stabseparation", "squad" },
             // gateRadius, clampRadius and abortOnMate are ungated: the clamp runs on any bot with a live swing.
             { "squadspacing", "squad" }, { "squadspacingvariance", "squad" },
+            { "holdmax", "melee" }, { "holdmin", "melee" },
             { "lanehalfwidth", "squad" }, { "squadstandoff", "squad" },
             { "breakoff", "post" }, { "breakoffrange", "breakoff" }, { "resetrange", "post" },
             // engageDelay is deliberately NOT gated on breakoff. It is a separate layer on the same wake: a
@@ -392,6 +425,11 @@ namespace MDS.Systems
                 case "matecrowdratio":   return SetFloat(value, 0f, v => _mateCrowdRatio = v, "mateCrowdRatio", ref error);
                 case "gateonmate":       return SetBool(value, v => _gateOnMate = v, "gateOnMate", ref error);
                 case "abortonmate":      return SetBool(value, v => _abortOnMate = v, "abortOnMate", ref error);
+                case "holdmax":          return SetFloat(value, 0f, v => _holdMax = v, "holdMax", ref error);
+                case "holdmin":          return SetFloat(value, 0f, v => _holdMin = v, "holdMin", ref error);
+                case "feintcount":       return SetFloat(value, 0f, v => _feintCount = v, "feintCount", ref error);
+                case "feintdepth":       return SetFloat(value, 0f, v => _feintDepth = v, "feintDepth", ref error);
+                case "feintdwell":       return SetFloat(value, 0f, v => _feintDwell = v, "feintDwell", ref error);
                 case "aimpitch":         return SetFloat(value, float.MinValue, v => { _aimPitch = v; RefreshBladeGeometry(); }, "aimPitch", ref error);
                 case "squadspacing":     return SetFloat(value, 0f, v => _squadSpacing = v, "squadSpacing", ref error);
                 case "squadspacingvariance": return SetFloat(value, 0f, v => _squadSpacingVar = v, "squadSpacingVariance", ref error);
@@ -470,6 +508,11 @@ namespace MDS.Systems
             yield return ("gateOnMate", _gateOnMate ? "true" : "false");
             yield return ("abortOnMate", _abortOnMate ? "true" : "false");
             yield return ("aimPitch", _aimPitch.ToString("0.###"));
+            yield return ("holdMax", _holdMax.ToString("0.##"));
+            yield return ("holdMin", _holdMin.ToString("0.##"));
+            yield return ("feintCount", _feintCount.ToString("0.##"));
+            yield return ("feintDepth", _feintDepth.ToString("0.##"));
+            yield return ("feintDwell", _feintDwell.ToString("0.##"));
             yield return ("squadSpacing", _squadSpacing.ToString("0.##"));
             yield return ("squadSpacingVariance", _squadSpacingVar.ToString("0.##"));
             yield return ("laneHalfWidth", _laneHalfWidth.ToString("0.##"));
@@ -504,7 +547,9 @@ namespace MDS.Systems
             _gateRadius = p._gateRadius; _clampRadius = p._clampRadius;
             _bladeMargin = p._bladeMargin; _mateConeFloor = p._mateConeFloor; _mateCrowdRatio = p._mateCrowdRatio;
             _gateOnMate = p._gateOnMate; _abortOnMate = p._abortOnMate;
-            _aimPitch = p._aimPitch; RefreshBladeGeometry();
+            _aimPitch = p._aimPitch; _holdMax = p._holdMax; _holdMin = p._holdMin;
+            _feintCount = p._feintCount; _feintDepth = p._feintDepth; _feintDwell = p._feintDwell;
+            RefreshBladeGeometry();
             _squadSpacing = p._squadSpacing; _squadSpacingVar = p._squadSpacingVar; _laneHalfWidth = p._laneHalfWidth;
             _squadStandoff = p._squadStandoff;
             _post = p._post; _breakoff = p._breakoff; _breakoffRange = p._breakoffRange; _engageDelay = p._engageDelay;

@@ -15,9 +15,11 @@ namespace MDS.Systems
             Register(BotAiEnum.Manual, () => new ManualAi());
             Register(BotAiEnum.StabbingDummy, () => new MeleeDummy());
             Register(BotAiEnum.RiposteDummy, () => new MeleeAi(BotAiEnum.RiposteDummy));
-            Register(BotAiEnum.DuelingEasy, () => new MeleeAi(BotAiEnum.DuelingEasy));
-            Register(BotAiEnum.DuelingNormal, () => new MeleeAi(BotAiEnum.DuelingNormal));
+            Register(BotAiEnum.SparringEasy, () => new MeleeAi(BotAiEnum.SparringEasy));
+            Register(BotAiEnum.SparringNormal, () => new MeleeAi(BotAiEnum.SparringNormal));
+            Register(BotAiEnum.Sparring, () => new MeleeAi(BotAiEnum.Sparring));
             Register(BotAiEnum.Dueling, () => new MeleeAi(BotAiEnum.Dueling));
+            Register(BotAiEnum.Feinting, () => new MeleeAi(BotAiEnum.Feinting));
             Register(BotAiEnum.Guardian, () => new MeleeAi(BotAiEnum.Guardian));
             Register(BotAiEnum.GroupEasy, () => new MeleeAi(BotAiEnum.GroupEasy));
             Register(BotAiEnum.GroupNormal, () => new MeleeAi(BotAiEnum.GroupNormal));

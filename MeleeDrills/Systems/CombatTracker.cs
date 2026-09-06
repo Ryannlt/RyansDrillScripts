@@ -17,8 +17,19 @@ namespace MDS.Systems
             public float CommitTime;    // realtime of the latest ExecuteMeleeWeaponStrike
             public bool WindingUp;      // a windup is chambered: seen, not yet committed or canceled
 
-            // True while this player is a melee threat: winding up, or a committed swing still in flight.
-            public bool IsThreat(float now) => WindingUp || (now - CommitTime) < LethalWindowSeconds;
+            // The live guard. A held stab is thrown the moment this drops, so it is a read, not just bookkeeping.
+            public bool Guarding;       // a block is up: raised and not yet stopped
+            public string GuardDir;     // "High"/"Low"/"Left"/"Right" of that block
+            public float GuardSince;    // realtime it went up
+            public float GuardDroppedAt; // realtime it last came down
+
+            public float SpentAt;       // realtime the committed swing was blocked, so it can no longer land
+            public float FeintedAt;     // realtime a chamber was thrown away rather than committed
+
+            // True while this player is a melee threat: winding up, or a committed swing still in flight. A swing
+            // somebody has already blocked is spent, whatever is left of its lethal window.
+            public bool IsThreat(float now) =>
+                WindingUp || ((now - CommitTime) < LethalWindowSeconds && CommitTime > SpentAt);
         }
 
         private static readonly Dictionary<int, MeleeState> _states = new();
@@ -55,10 +66,19 @@ namespace MDS.Systems
                     s.WindingUp = false;
                     changed = true;
                 }
-                else if (name.StartsWith("MeleeBlock") || name == "StartMeleeBlock")
+                else if (name.StartsWith("MeleeBlock") || name == "StartMeleeBlock" || name == "ChangeMeleeBlock")
                 {
-                    // a block mid-windup is a feint or cancel; the chamber is gone.
-                    if (s.WindingUp) { s.WindingUp = false; changed = true; }
+                    // a block mid-windup is a feint or cancel; the chamber is gone, and they are briefly open.
+                    if (s.WindingUp) { s.WindingUp = false; s.FeintedAt = now; changed = true; }
+
+                    // GuardSince is only stamped on the way up, so switching direction does not restart the clock.
+                    if (!s.Guarding) { s.Guarding = true; s.GuardSince = now; }
+                    if (name.Length > 10 && name.StartsWith("MeleeBlock")) s.GuardDir = name.Substring(10);
+                    changed = true;
+                }
+                else if (name == "StopMeleeBlock")
+                {
+                    if (s.Guarding) { s.Guarding = false; s.GuardDroppedAt = now; changed = true; }
                 }
             }
 
@@ -71,8 +91,18 @@ namespace MDS.Systems
         // own recovery; a blocked stab still costs the full ~1.5s, the same as a miss.
         public static void OnBlock(int attackerId, int defenderId)
         {
-            _lastBlock[defenderId] = Time.realtimeSinceStartup;
+            float now = Time.realtimeSinceStartup;
+
+            _lastBlock[defenderId] = now;
             _lastBlockAttacker[defenderId] = attackerId;
+
+            // That swing is spent. Without this it stays a "threat" for the rest of its lethal window, so every
+            // bot keeps guarding against a stab it has already stopped instead of answering it.
+            if (_states.TryGetValue(attackerId, out MeleeState s))
+            {
+                s.SpentAt = now;
+                _states[attackerId] = s;
+            }
         }
 
         // Realtime of playerId's last successful block as defender, or 0 if none seen.

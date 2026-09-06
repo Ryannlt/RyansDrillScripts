@@ -17,9 +17,10 @@ namespace MDS.Systems
         public float AttackAllowedAt; // realtime the group's engage delay expires, so members hold fire until then
         public float Spacing;     // the line's live gap, so mate-avoidance rules can be sized against it
         public float Facing;      // heading the line faces, used while there is no enemy to look at
+        public bool Loose;        // a place to hold rather than march to: no misplacement, and a wide deadband
     }
 
-    // Turns a spawn batch of bots into a formation: slots on an arc around the enemy, and lane discipline.
+    // Turns a spawn batch of bots into a formation: a line for the front rank, a loose band for the rest.
     public static class SquadCoordinator
     {
         private static readonly Dictionary<int, SquadSlot> _slots = new();
@@ -42,6 +43,24 @@ namespace MDS.Systems
 
         // How fast the anchor may reposition. Slower than a bot walks, so the line is towed rather than dragged.
         private const float FollowSpeed = 3f;
+
+        // Ground is given faster than it is taken. A line that cannot back off as fast as a player charges is
+        // simply run through, while closing slowly is what keeps the formation deliberate.
+        private const float RetreatSpeed = 5f;
+
+        // Floor under the line's standoff, whatever its width works out to. Four members would otherwise stand
+        // the point 0.79m out and crowd the enemy with the inner pair.
+        private const float MinStandoff = 1f;
+
+        // Slack on the range comparison that decides the group is losing ground, so float noise cannot read as
+        // an enemy closing.
+        private const float RangeEpsilon = 0.001f;
+
+        // The band a reserve holds, in squadStandoff: a little further out than the line, and still inside a
+        // blade at the far edge. A band rather than a ring so the pushback between reserves has somewhere to
+        // move them without the pull back to range immediately undoing it.
+        private const float ReserveInner = 1f;
+        private const float ReserveOuter = 1.3f;
 
         // How close to its slot a member counts as being in place, used to decide the formation has re-formed.
         private const float SettleRadius = 0.7f;
@@ -77,6 +96,9 @@ namespace MDS.Systems
             // Where the bout started and when. Stamped once on the provocation that wakes the group.
             public Vector2 BreakoffFrom;
             public float ProvokedAt;
+
+            // Last tick's range to the enemy, so the anchor can tell whether giving ground actually gained any.
+            public float LastRange;
 
             // The line's live gap and the width it is drifting toward. Per formation, so the whole line agrees.
             public float Spacing;
@@ -154,6 +176,11 @@ namespace MDS.Systems
                     Vector3 t = target.PlayerObject.transform.position;
                     Vector2 targetPos = new Vector2(t.x, t.z);
 
+                    // Sized on the front rank, not the whole group: a fifth bot goes behind the line, so it must
+                    // not drag the point in as though the line had got wider.
+                    float spacing = state.Spacing > 0f ? state.Spacing : settings.Spacing;
+                    int rankSize = RankSize(settings.Spacing, settings.Standoff);
+
                     // A withdrawing group re-forms where the bout ended: the anchor is frozen, not driven to any range.
                     Vector2 anchor;
                     if (state.Phase == SquadPhase.Withdrawing)
@@ -166,12 +193,15 @@ namespace MDS.Systems
                     }
                     else
                     {
-                        anchor = MoveAnchor(state, targetPos, settings.Standoff, deltaTime);
+                        // Set from the ends of the line, so a wider formation stands its point that much closer
+                        // and every member holds squadStandoff rather than only the one in the middle.
+                        anchor = MoveAnchor(state, targetPos,
+                            LineStandoff(Mathf.Min(members.Count, rankSize), spacing, settings.Standoff), deltaTime);
                     }
 
                     Vector2 toTarget = targetPos - anchor;
                     Vector2 forward = toTarget.sqrMagnitude > 1e-4f ? toTarget.normalized : MovementSolver.DirectionFromHeading(state.PostHeading);
-                    AssignSlots(members, targetPos, anchor, forward, state, settings);
+                    AssignSlots(members, targetPos, anchor, forward, state, settings, rankSize);
 
                     // Settling is judged on the slots just written, so it has to come after them. The transition
                     // lands on the next tick, which nobody can see.
@@ -202,7 +232,8 @@ namespace MDS.Systems
                     Vector2 forward = MovementSolver.DirectionFromHeading(goHome ? state.PostHeading : state.RestHeading);
 
                     // The lane check needs somewhere to look, so it is given a point straight ahead of the line.
-                    AssignSlots(members, home + forward, home, forward, state, settings);
+                    // One rank however many there are: ranks are for engaging, and a station waits as it was set up.
+                    AssignSlots(members, home + forward, home, forward, state, settings, members.Count);
                 }
             }
         }
@@ -644,6 +675,10 @@ namespace MDS.Systems
                 _groups[groupId] = state;
             }
 
+            // Only an idle group may found its post. A fighting one is somewhere it walked to, and replacement
+            // churn briefly puts more bots in the batch than it was summoned with, which would move the post there.
+            if (state.Phase != SquadPhase.Posted || state.TargetId != null) return state;
+
             if (members.Count <= state.FoundedCount) return state;
 
             state.Post = MeanPosition(members);
@@ -701,6 +736,29 @@ namespace MDS.Systems
             return anchor;
         }
 
+        // How many a line may hold before LineStandoff would push it inside MinStandoff. The same constraint that
+        // already sets the standoff, so the front rank follows squadStandoff and squadSpacing rather than being a
+        // number of its own. Fed the lever and not the live gap, so a breathing line cannot reshuffle the ranks.
+        private static int RankSize(float spacing, float standoff)
+        {
+            if (spacing <= 0f) return 1;
+
+            float inner = (standoff * standoff) - (MinStandoff * MinStandoff);
+            if (inner <= 0f) return 1;
+
+            return Mathf.Max(1, Mathf.FloorToInt(2f * Mathf.Sqrt(inner) / spacing) + 1);
+        }
+
+        // The range squadStandoff describes, measured from the ends of the line rather than its middle. The ends
+        // sit sqrt(standoff^2 + offset^2) out, so setting the point from them puts the whole line at standoff.
+        private static float LineStandoff(int members, float spacing, float standoff)
+        {
+            float halfSpan = (members - 1) * spacing * 0.5f;
+            float inner = (standoff * standoff) - (halfSpan * halfSpan);
+
+            return Mathf.Max(inner <= 0f ? 0f : Mathf.Sqrt(inner), MinStandoff);
+        }
+
         private static Vector2 MoveAnchor(GroupState state, Vector2 targetPos, float standoff, float deltaTime)
         {
             Vector2 anchor = state.Anchor;
@@ -710,14 +768,26 @@ namespace MDS.Systems
             if (distance > 1e-4f)
             {
                 Vector2 dir = toTarget / distance;
-                float step = FollowSpeed * deltaTime;
 
                 if (distance > standoff + AnchorTolerance)
-                    anchor += dir * Mathf.Min(step, distance - standoff);
+                {
+                    anchor += dir * Mathf.Min(FollowSpeed * deltaTime, distance - standoff);
+                }
                 else if (distance < standoff - AnchorTolerance)
-                    anchor -= dir * Mathf.Min(step, standoff - distance);
+                {
+                    // Already giving ground as fast as it can, and the enemy closed anyway. Backing up cannot win
+                    // from here, so the group stands instead: the enemy runs past, the direction to them reverses,
+                    // and the line ends up behind them facing back without anything having to decide to turn.
+                    float deficit = standoff - distance;
+                    bool flatOut = deficit > RetreatSpeed * deltaTime;
+                    bool losing = distance < state.LastRange - RangeEpsilon;
+
+                    if (!(flatOut && losing))
+                        anchor -= dir * Mathf.Min(RetreatSpeed * deltaTime, deficit);
+                }
             }
 
+            state.LastRange = distance;
             state.Anchor = anchor;
             return anchor;
         }
@@ -739,7 +809,7 @@ namespace MDS.Systems
 
                 // Initialized, not merely spawned: a bot is teleported to where it was summoned as it spawns, and
                 // counting it before that would found the group's post at the game's spawn point instead.
-                if (!bot.Initialized || bot.Position == null) continue;
+                if (!bot.Initialized || !bot.Placed || bot.Position == null) continue;
 
                 if (!_byGroup.TryGetValue(bot.GroupId, out List<BotController> group))
                 {
@@ -760,14 +830,27 @@ namespace MDS.Systems
         }
 
         // Lays out one group on its anchor and records each member's slot.
-        private static void AssignSlots(List<BotController> group, Vector2 facePos, Vector2 anchor, Vector2 forward, GroupState state, SquadSettings settings)
+        private static void AssignSlots(List<BotController> group, Vector2 facePos, Vector2 anchor, Vector2 forward, GroupState state, SquadSettings settings, int rankSize)
         {
             // The line is held square to the enemy, so the gap between members always faces them.
             Vector2 right = new Vector2(-forward.y, forward.x);
 
+            // Nearest the formation's own point holds the line, not nearest the enemy. Ranking on the enemy
+            // promotes a bot standing behind them and then hands it a slot on the far side, so it walks into the
+            // enemy trying to reach it. Ranked on the point, a bot round the back is simply not a line bot.
+            if (group.Count > rankSize)
+                group.Sort((a, b) => (Planar(a) - anchor).sqrMagnitude.CompareTo((Planar(b) - anchor).sqrMagnitude));
+
+            // Only a fight has reserves. Backing off to re-form and waiting at the post are done as one line, or
+            // the extras would be circling in toward the enemy while the rest of the group walks away from it.
+            int front = state.Phase == SquadPhase.Engaged
+                ? Mathf.Min(rankSize, group.Count)
+                : group.Count;
+
             // Ordering along that line keeps every bot on the side it is already on, so the slots turn with the
             // enemy instead of being swapped between bots and sending them through each other.
-            group.Sort((a, b) => Vector2.Dot(Planar(a) - anchor, right).CompareTo(Vector2.Dot(Planar(b) - anchor, right)));
+            group.Sort(0, front, Comparer<BotController>.Create(
+                (a, b) => Vector2.Dot(Planar(a) - anchor, right).CompareTo(Vector2.Dot(Planar(b) - anchor, right))));
 
             // The squad shares its most recent successful guard: a blocked stab is spent for the whole line.
             float blockTime = 0f;
@@ -775,15 +858,34 @@ namespace MDS.Systems
                 blockTime = Mathf.Max(blockTime, CombatTracker.LastBlockTime(group[i].PlayerId));
 
             float spacing = state.Spacing > 0f ? state.Spacing : settings.Spacing;
-            float span = (group.Count - 1) * spacing;
+            float span = (front - 1) * spacing;
 
             for (int i = 0; i < group.Count; i++)
             {
-                float offset = (i * spacing) - (span * 0.5f);
+                bool loose = i >= front;
+
+                Vector2 position;
+                if (loose)
+                {
+                    // Bearing kept, range clamped into the band: a reserve closes on the enemy from whichever side
+                    // it is already on, so it can reach and stab like anyone else. No bearing is assigned to it.
+                    // The pushback between reserves is what spreads them into a ring rather than a queue.
+                    Vector2 fromTarget = Planar(group[i]) - facePos;
+                    float range = fromTarget.magnitude;
+                    Vector2 bearing = range > 1e-4f ? fromTarget / range : -forward;
+
+                    position = facePos + bearing * Mathf.Clamp(range,
+                        settings.Standoff * ReserveInner, settings.Standoff * ReserveOuter);
+                }
+                else
+                {
+                    position = anchor + right * ((i * spacing) - (span * 0.5f));
+                }
 
                 _slots[group[i].PlayerId] = new SquadSlot
                 {
-                    Position = anchor + right * offset,
+                    Position = position,
+                    Loose = loose,
                     LaneClear = IsLaneClear(group, i, facePos, settings),
                     Members = group.Count,
                     BlockTime = blockTime,

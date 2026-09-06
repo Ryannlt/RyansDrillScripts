@@ -240,7 +240,7 @@ namespace MDS.Systems
                     || killer.Bot.Faction == victim.Bot.Faction);
 
             if (sameSide && killer.Position is Vector3 kp && victim.Position is Vector3 vp && killer.Heading is float kh)
-                MeleeProbe.LogFriendlyFire(killerPlayerId, victimPlayerId,
+                MeleeProbe.LogFriendlyFire(killerPlayerId, victimPlayerId, killer.AiType,
                     new Vector2(kp.x, kp.z), kh, new Vector2(vp.x, vp.z));
 
             SquadCoordinator.OnMemberKilled(victim.GroupId, victimPlayerId, killerPlayerId);

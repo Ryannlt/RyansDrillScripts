@@ -10,11 +10,27 @@ namespace MDS.Systems
         // How hard the push away from other bots counts next to the movement it is blended into.
         private const float SeparationWeight = 1.5f;
 
+        // A reserve is spread by pushback rather than placed, so its comfort zone is wider and pushes harder.
+        // This is what turns a handful of extras into a ring around the enemy instead of a queue on one side.
+        private const float LooseSeparationScale = 3.5f;
+        private const float LooseSeparationBoost = 2f;
+
+        // Push below this is dropped. The falloff never quite reaches zero, so without a floor a reserve creeps
+        // at a few percent throttle forever, dragging the loose slot along behind it and never settling. The
+        // floor also turns the soft falloff into a real spacing: pushback only starts inside about two thirds
+        // of the comfort zone.
+        private const float LooseSeparationFloor = 0.35f;
+
         // Reused when gathering neighbour positions for Steering.Separation, so a 20 Hz tick does not allocate.
         private static readonly List<Vector2> _separationNeighbours = new();
 
         // Strike-mechanic timings, measured from the engine. Not levers.
         private const float WindupSeconds = 0.15f;    // hold the windup this long (one MeleeStrike) before releasing
+        // How often a held chamber is refreshed. Re-sending MeleeStrike restarts the windup, which is what keeps
+        // the pose up; provisional until measured in game.
+        private const float HoldSustainInterval = 0.1f;
+        // How long a thrown-away chamber stays worth punishing. Holding through it hands the opening back.
+        private const float FeintPunishWindow = 1f;
         // A committed stab occupies the bot this long whether it misses or is blocked. Timed from release.
         private const float MissedStabDuration = 1.5f;
         // Extra time we refuse to block after throwing first. Nerve, not geometry - not part of blade-live time.
@@ -39,6 +55,7 @@ namespace MDS.Systems
         private const float MoveHysteresis = 0.5f;     // ignore range jitter smaller than this when deciding to advance
         private const float StrikerLockRange = 3f;     // attacker-lock only triggers for strikers within this when targetRange is unlimited
         private const float SlotDeadband = 0.15f;      // close enough to the slot to stop rather than shuffle
+        private const float LooseSlotDeadband = 0.5f;  // a reserve holds a rough station, not a place to the centimetre
 
         // The engine refuses a melee hit past this vertical gap, before any of its raycasts run.
         private const float MateVerticalReach = 1.5f;
@@ -76,7 +93,7 @@ namespace MDS.Systems
         private string _blockToken;           // the block playerAction we're currently holding (null = not blocking)
 
         // Attack sequencer state (see StepAttack).
-        private enum AttackPhase { None, Chamber }
+        private enum AttackPhase { None, Chamber, Swing, Feint }
 
         // What the bot is doing, as opposed to where its swing is. Keeping the two apart is the point: a stance
         // added here does not have to be crossed with every strike-state flag in Decide.
@@ -95,6 +112,11 @@ namespace MDS.Systems
         private bool _releasePending;         // a dropped windup still needs releasing, or the engine keeps cycling it
         private float _chamberStartedAt;      // realtime our windup began (for the "I threw first" read)
         private float _executeAt;             // realtime to release the held windup
+        private float _holdUntil;             // realtime a deliberate hold gives up and throws anyway
+        private float _holdMinUntil;          // realtime before which a hold stands regardless of their guard
+        private float _nextSustainAt;         // realtime to re-send MeleeStrike so the chamber stays up
+        private bool _holdChosen;             // the read said hold this chamber, rather than throw on the beat
+        private float _strikeThrownAt;        // realtime the last stab was released, which a feint cancels from
         private bool _threwFirst;             // this swing out-timed the enemy's, so commit to it harder
 
         // Stab-priority state: after our guard absorbs an attack we get a brief riposte window (Decide).
@@ -111,6 +133,7 @@ namespace MDS.Systems
         private float _lastAimClamped;
         private int _selfId = -1;
         private float _blockStartedAt;        // realtime the current guard went up (for MinBlockHold)
+        private bool _blockIsFeint;           // the guard up right now is a feint's cancel, so MinBlockHold is off
         private float _blockDesiredSince = -1f; // realtime we first wanted this guard (for block reaction; -1 = not)
         private float _blockReadyAt;          // realtime the guard may go up (start plus block reaction beat)
         private float _rerollAt;              // realtime to next re-roll the hold distance
@@ -235,7 +258,7 @@ namespace MDS.Systems
 
                 // Exact slot, no bias and no lag: holding a fighting line badly is the drill, walking home badly
                 // is just sluggish.
-                Vector2 idleMove = _move ? EngageVelocity(pose, slot.Position, true, slot.Position, 0f, false) : Vector2.zero;
+                Vector2 idleMove = _move ? EngageVelocity(pose, slot.Position, true, slot.Position, SlotDeadband, 0f, false) : Vector2.zero;
 
                 // Look where it is going while it is going there, and take the formation's bearing on arrival.
                 float idleHeading = idleMove.sqrMagnitude > 1e-4f
@@ -267,6 +290,7 @@ namespace MDS.Systems
             Vector3 tp = target.PlayerObject.transform.position;
             Vector2 targetPos = new Vector2(tp.x, tp.z);
             CombatTracker.TryGet(target.PlayerId, out CombatTracker.MeleeState enemy);
+            StepRead(enemy, now, target.PlayerId);
 
             // What the bot is doing this tick. Its own axis, separate from where its swing is.
             Posture posture =
@@ -305,6 +329,10 @@ namespace MDS.Systems
                 ? ClampAimAroundMates(self, pose, aimPos, crowdDistance, out mateAcrossBlade)
                 : MovementSolver.HeadingTo(pose.Position, aimPos);
 
+            // A long feint is held out past the range its stab could connect at, so it is aimed to miss on
+            // purpose. Added after the mate clamp, which is about not hitting friends and still applies.
+            aimHeading += FeintAimOffset();
+
             // How far the commanded heading actually moves this tick. The engine joins its frames with rays.
             float turned = swingLive ? Mathf.DeltaAngle(pose.Heading, aimHeading) : 0f;
 
@@ -341,12 +369,22 @@ namespace MDS.Systems
             // While our own strike is still flying we must not block: a block cancels the swing before it lands.
             bool committed = now < _strikeCommittedUntil;
 
+            // Asked before anything else reads the phase, so a cancel that starts this tick is seen by all of it.
+            string feintBlock = FeintBlock(now, enemy);
+
             // I threw first: our windup began before theirs, so commit rather than bailing into a guard.
             bool chamberCommit = (press || riposte) && _attackPhase == AttackPhase.Chamber
                                  && enemy.IsThreat(now) && _chamberStartedAt <= enemy.WindupTime;
             if (chamberCommit) _threwFirst = true; // out-timed them, so commit harder to this swing (see StepAttack)
 
-            string desiredBlock = (priority || committed || chamberCommit) ? null : DesiredBlockToken(enemy, now);
+            // A deliberate hold never bails into a guard. A swing we have already blocked still counts as a threat
+            // for LethalWindowSeconds afterwards, and guarding against that ghost cancelled the chamber and started
+            // the hold over. A real new windup is answered by releasing the stab, which beats it anyway.
+            bool holding = _attackPhase == AttackPhase.Chamber && _holdMax > 0f && now < _holdUntil;
+
+            // A feint's cancel is a guard raised on purpose, so it outranks every reason not to raise one.
+            string desiredBlock = feintBlock
+                ?? ((priority || committed || chamberCommit || holding) ? null : DesiredBlockToken(enemy, now));
 
             // Block reaction: a real player takes a beat to raise the guard after reading the attack. It applies
             // only to the initial raise; switching guard direction once up stays instant. min = max = 0 is instant.
@@ -371,7 +409,9 @@ namespace MDS.Systems
 
             // Minimum block hold: once the guard is up, keep it up briefly even if we'd now drop it to riposte, so
             // it reads and its animation completes. Never overrides committing our own in-flight strike.
-            if (desiredBlock == null && _blockToken != null && !committed && !chamberCommit
+            // A feint's cancel is exempt: that constant is here so a defensive guard reads and animates, which is
+            // the opposite of what a cancel wants. Without this the block runs to 0.35s whatever feintDwell says.
+            if (desiredBlock == null && _blockToken != null && !committed && !chamberCommit && !_blockIsFeint
                 && now - _blockStartedAt < MinBlockHold)
                 desiredBlock = _blockToken;
 
@@ -388,7 +428,8 @@ namespace MDS.Systems
             if (desiredBlock != null)
             {
                 // Under threat: block. Abort any in-progress strike, since raising a block cancels our own windup.
-                _attackPhase = AttackPhase.None;
+                // A feint is the exception: there the cancel is the point, and the phase is keeping the chain's place.
+                if (_attackPhase != AttackPhase.Feint) _attackPhase = AttackPhase.None;
                 if (_blockToken != desiredBlock)
                 {
                     if (_blockToken == null) _blockStartedAt = now; // this guard just went up
@@ -398,7 +439,7 @@ namespace MDS.Systems
                 // Guarding: hold the further defensive distance to make space to read, following a circling player
                 // instead of freezing. While waiting (passive) hold the closer passiveRange instead.
                 if (_move)
-                    worldMove = EngageVelocity(pose, targetPos, slotDrivesMovement, SlotTarget(slot, now), posture == Posture.Waiting ? _passiveRange : MovementRange(false, now), pursue);
+                    worldMove = EngageVelocity(pose, targetPos, slotDrivesMovement, SlotTarget(slot, now), slot.Loose ? LooseSlotDeadband : SlotDeadband, posture == Posture.Waiting ? _passiveRange : MovementRange(false, now), pursue);
             }
             else
             {
@@ -408,15 +449,16 @@ namespace MDS.Systems
                 {
                     intent.Action = "StopMeleeBlock";
                     _blockToken = null;
+                    _blockIsFeint = false;
                     droppedBlock = true;
                 }
                 // Free: press closes to the offensive range, otherwise hold the reading distance. While waiting
                 // (passive) hold the closer passiveRange so it doesn't back off far from an approaching player.
                 if (_move)
-                    worldMove = EngageVelocity(pose, targetPos, slotDrivesMovement, SlotTarget(slot, now), posture == Posture.Waiting ? _passiveRange : MovementRange(press, now), pursue);
+                    worldMove = EngageVelocity(pose, targetPos, slotDrivesMovement, SlotTarget(slot, now), slot.Loose ? LooseSlotDeadband : SlotDeadband, posture == Posture.Waiting ? _passiveRange : MovementRange(press, now), pursue);
 
                 // Attack when the enemy is not threatening. Priority bypasses press and the cooldown.
-                if ((press || riposte || _attackPhase == AttackPhase.Chamber) && !droppedBlock)
+                if ((press || riposte || _attackPhase == AttackPhase.Chamber || _feintsDone > 0) && !droppedBlock)
                     // Range is judged from the slot, so a bot's own jitter cannot veto its offence.
                     StepAttack(ref intent, pose, targetPos, slotDrivesMovement ? slot.Position : pose.Position,
                         priority, press,
@@ -424,13 +466,14 @@ namespace MDS.Systems
                             && !(_gateOnMate && (MateInBladeBand(self, pose) || TargetBehindMate(self, pose, aimPos))),
                         inSquad ? self.GroupId : 0,
                         inSquad ? (slot.StabHigh ? "High" : "Low") : null,
-                        inSquad ? (slot.SharedHigh ? "High" : "Low") : null);
+                        inSquad ? (slot.SharedHigh ? "High" : "Low") : null,
+                        enemy);
             }
 
-            // While a slot is driving the movement it is the whole decision: the formation already guarantees the
-            // spacing, so blending separation into it can only pull against the slot and slow the bot down.
-            if (!slotDrivesMovement)
-                worldMove = WithSeparation(self, pose, worldMove);
+            // A line slot already guarantees the spacing, so separation could only pull against it. A loose one
+            // does not: there the pushback is the only thing holding reserves off each other, and off the line.
+            if (!slotDrivesMovement || slot.Loose)
+                worldMove = WithSeparation(self, pose, worldMove, slot.Loose);
 
             intent.MoveAxis = ToAxis(pose, worldMove);
 
@@ -465,20 +508,63 @@ namespace MDS.Systems
         }
 
         // Attack sequencer: one MeleeStrike to chamber, silence while it holds, one Execute to release.
-        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, Vector2 reachFrom, bool priority, bool press, bool laneClear, int groupId, string assignedDir, string matchDir)
+        private void StepAttack(ref BotIntent intent, BotPose pose, Vector2 targetPos, Vector2 reachFrom, bool priority, bool press, bool laneClear, int groupId, string assignedDir, string matchDir, CombatTracker.MeleeState enemy)
         {
             float now = Time.realtimeSinceStartup;
 
             if (_attackPhase == AttackPhase.Chamber)
             {
+                // A deliberate hold: keep the chamber up and wait for a reason to throw, rather than releasing on
+                // a fixed beat. Restarting the windup is what sustains the pose, so re-sending is the mechanism.
+                if (_holdMax > 0f && now < _holdUntil && ReasonToHold(enemy, now))
+                {
+                    if (now >= _nextSustainAt)
+                    {
+                        intent.Action = "MeleeStrike" + _attackDir;
+                        _nextSustainAt = now + HoldSustainInterval;
+                    }
+                    return;
+                }
+
                 // Re-sending MeleeStrike restarts the windup, so while holding we issue nothing.
                 if (now >= _executeAt)
                 {
                     intent.Action = "ExecuteMeleeWeaponStrike";
-                    _attackPhase = AttackPhase.None;
+                    _strikeThrownAt = now;
+
+                    // A stab we mean to cancel stays ours until the cancel goes out, so the sequencer waits on it
+                    // instead of treating the attack as over. The cooldown is still charged here and refunded by
+                    // the cancel, so a chain that breaks down does not leave the bot swinging for free.
+                    bool feinting = FeintOwed();
+                    if (feinting) BeginFeintedSwing(now, (targetPos - reachFrom).magnitude);
+                    _attackPhase = feinting ? AttackPhase.Swing : AttackPhase.None;
+
                     _attackCooldownUntil = now + MissedStabDuration + Random.Range(0f, _attackReadBeat);
 
                     MeleeProbe.NoteStrike(_selfId, now, _lastAimDesired, _lastAimClamped, _targetId ?? -1, laneClear);
+
+                    float held = now - _chamberStartedAt;
+
+                    // The cap did not end it, so ReasonToHold did: they broke first, which is the hold paying off.
+                    bool brokeEarly = now < _holdUntil;
+                    NoteChamberEnded(brokeEarly);
+
+                    if (_holdMax > 0f && MeleeProbe.IsProbing(_selfId))
+                        MeleeProbe.LogHold(_selfId, _attackDir, held,
+                            !_holdChosen ? "noHold"
+                            : enemy.WindingUp ? "theyStabbed"
+                            : now - enemy.FeintedAt < FeintPunishWindow ? "theyFeinted"
+                            : !enemy.Guarding ? "guardDown" : "holdMax",
+                            _holdPaysRate.Value, _baitRate.Value);
+
+                    // Only the stab allowed to land says anything about the direction the feints set up, and
+                    // only it ends the chain.
+                    if (!feinting)
+                    {
+                        NoteStabThrown(now, _feintsDone > 0, _feintSwitched, _feintLong);
+                        ResetFeints();
+                    }
+
                     _priorityUntil = 0f;                              // riposte thrown, priority spent
                     // Commit to the swing, since blocking now would cancel it. If we threw first, commit longer so
                     // the bot backs its own stab as it lands instead of flinching into a guard and eating the trade.
@@ -488,25 +574,34 @@ namespace MDS.Systems
                 return;
             }
 
+            // A stab is in flight waiting for its cancel, or the cancel is still playing out. Chambering on top
+            // of either would throw the chain away and skip the guard a player would have to go through.
+            if (_attackPhase == AttackPhase.Swing || _attackPhase == AttackPhase.Feint) return;
+
             // Fresh out of the spawn: do not swing yet.
             if (now < _strikeReadyAt) return;
+
+            // Mid-chain: the cancel already committed us to this attack, so finish it rather than asking press
+            // and the cooldown again. Without this a chain stalls in the block whenever they close the distance.
+            bool resuming = _feintsDone > 0 && now < _feintUntil + FeintResumeWindow;
 
             // Do not start a swing that would go through a squadmate. Only the start is gated.
             if (!laneClear) return;
 
             // Idle: begin a strike if allowed and close enough. A priority riposte ignores press and cooldown; a
             // non-priority strike (throwing first) needs press and respects the cooldown.
-            if (!priority)
+            if (!priority && !resuming)
             {
                 if (!press) return;
                 if (now < _attackCooldownUntil) return;
             }
             // A press attack only commits inside attackRange. A priority riposte always throws at the target
             // regardless of range, so a stationary RiposteDummy still counters an attacker who has backed off.
-            if (!priority && (targetPos - reachFrom).sqrMagnitude > _attackRange * _attackRange) return;
+            if (!priority && !resuming && (targetPos - reachFrom).sqrMagnitude > _attackRange * _attackRange) return;
 
-            // Direction is decided once, here, as the swing starts; per tick would flicker it mid-windup.
-            string dir = PickStabDirection(assignedDir, matchDir);
+            // Direction is decided once, here, as the swing starts; per tick would flicker it mid-windup. A
+            // re-chamber out of a feint already had its direction picked by the read when the cancel went out.
+            string dir = _feintNextDir ?? PickStabDirection(assignedDir, matchDir);
 
             // Last gate before the swing, so only a bot actually about to stab files a claim.
             if (!SquadCoordinator.TryClaimStab(groupId, now, _stabSeparation, dir == "High")) return;
@@ -514,9 +609,35 @@ namespace MDS.Systems
             _attackDir = dir;
             _chamberStartedAt = now;
             _executeAt = now + WindupSeconds;
+            _guardSeenThisChamber = false;
+            _holdChosen = WillHold();
+            _holdUntil = now + (_holdChosen ? _holdMax : 0f);
+            _holdMinUntil = now + _holdMin;
+            _nextSustainAt = now + HoldSustainInterval;
             _threwFirst = false;                               // set true only if we out-time the enemy this windup
             _attackPhase = AttackPhase.Chamber;
             intent.Action = "MeleeStrike" + _attackDir;
+        }
+
+        // Whether a chambered stab is worth keeping back. Holding is only ever worth it against a raised guard:
+        // drop the guard and it lands, start a stab and we release first, having been chambered the whole time.
+        private bool ReasonToHold(CombatTracker.MeleeState enemy, float now)
+        {
+            if (enemy.WindingUp) return false;   // they have committed to a swing; ours is already up, so throw
+
+            // They just threw a chamber away, which is the opening this whole mechanic exists to find. Holding
+            // through it, even for holdMin, hands it straight back, so this outranks the minimum.
+            if (now - enemy.FeintedAt < FeintPunishWindow) return false;
+
+            // A hold stands for holdMin whatever the guard says. A person needs a moment to get one up after
+            // seeing the chamber, and reading that moment as "not blocking" threw the stab before they could.
+            if (now < _holdMinUntil) return true;
+
+            if (enemy.Guarding) return true;     // guard up: nothing to throw at yet
+
+            // Guard down, and whether that is an opening or a bait is the read. It was rolled once when the guard
+            // fell, so the answer stands instead of being re-decided every tick until it happens to say throw.
+            return !_takeThisDrop;
         }
 
         // Drop a windup without throwing it. The engine keeps cycling the attack until something ends it.
@@ -524,6 +645,7 @@ namespace MDS.Systems
         {
             if (_attackPhase == AttackPhase.Chamber) _releasePending = true;
             _attackPhase = AttackPhase.None;
+            ResetFeints();
         }
 
         // coordinate runs 0 to 1 with chance in the middle: the top half makes updowns, the bottom refuses them.
@@ -568,6 +690,10 @@ namespace MDS.Systems
         // bout. Everything that moves it toward a slot goes through here, so imperfection lands in one place.
         private Vector2 SlotTarget(SquadSlot slot, float now)
         {
+            // A loose slot is already where the bot stands, so adding the misplacement to it would walk the bot
+            // off a bias-length at a time as each tick fed its new position back in as its place.
+            if (slot.Loose) return slot.Position;
+
             if (!_slotSeenValid || now >= _resampleAt)
             {
                 _slotSeen = slot.Position;
@@ -625,11 +751,11 @@ namespace MDS.Systems
         }
 
         // Movement for this tick. A slot overrides the hold range entirely.
-        private static Vector2 EngageVelocity(BotPose pose, Vector2 targetPos, bool useSlot, Vector2 slotPos, float holdRange, bool pursue)
+        private static Vector2 EngageVelocity(BotPose pose, Vector2 targetPos, bool useSlot, Vector2 slotPos, float deadband, float holdRange, bool pursue)
         {
             if (useSlot)
             {
-                return (slotPos - pose.Position).sqrMagnitude < SlotDeadband * SlotDeadband
+                return (slotPos - pose.Position).sqrMagnitude < deadband * deadband
                     ? Vector2.zero
                     : Steering.Seek(pose, slotPos);
             }
@@ -639,12 +765,17 @@ namespace MDS.Systems
 
         // Adds the push away from nearby bots. It applies even when the bot would otherwise stand still, which is
         // the point: a clump that never spreads out spends the fight swinging through each other.
-        private Vector2 WithSeparation(BotController self, BotPose pose, Vector2 worldMove)
+        private Vector2 WithSeparation(BotController self, BotPose pose, Vector2 worldMove, bool loose)
         {
-            if (_separationRange > 0f)
-                worldMove += Separation(self, pose) * SeparationWeight;
+            if (_separationRange <= 0f) return worldMove;
 
-            return worldMove;
+            float range = loose ? _separationRange * LooseSeparationScale : _separationRange;
+            float weight = loose ? SeparationWeight * LooseSeparationBoost : SeparationWeight;
+
+            Vector2 push = Separation(self, pose, range) * weight;
+            if (loose && push.sqrMagnitude < LooseSeparationFloor * LooseSeparationFloor) return worldMove;
+
+            return worldMove + push;
         }
 
         // Expresses a world movement in the bot's own frame for SetInputAxis.
@@ -838,7 +969,7 @@ namespace MDS.Systems
             return sb.ToString();
         }
 
-        private Vector2 Separation(BotController self, BotPose pose)
+        private Vector2 Separation(BotController self, BotPose pose, float range)
         {
             _separationNeighbours.Clear();
 
@@ -850,7 +981,7 @@ namespace MDS.Systems
                     _separationNeighbours.Add(new Vector2(p.x, p.z));
             }
 
-            return Steering.Separation(pose, _separationNeighbours, _separationRange);
+            return Steering.Separation(pose, _separationNeighbours, range);
         }
 
         // The friendly this bot escorts, or null when it isn't guarding anyone or that player is gone. A ward who
@@ -926,7 +1057,7 @@ namespace MDS.Systems
             {
                 LookHeading = lookHeading,
                 LookPitch = _aimPitch,
-                MoveAxis = ToAxis(pose, WithSeparation(self, pose, HoldRangeVelocity(pose, wardPos, _guardFollowRange, pursue: true))),
+                MoveAxis = ToAxis(pose, WithSeparation(self, pose, HoldRangeVelocity(pose, wardPos, _guardFollowRange, pursue: true), loose: false)),
             };
 
             if (_runPending)
@@ -955,7 +1086,7 @@ namespace MDS.Systems
                 }
             }
 
-            // engageOnAttack (Dueling) is a passive/engaged state machine that fully owns targeting.
+            // engageOnAttack (Sparring) is a passive/engaged state machine that fully owns targeting.
             if (_engageOnAttack)
                 return ResolveEngageOnAttack(self, now);
 

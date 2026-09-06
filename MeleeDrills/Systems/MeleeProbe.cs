@@ -37,6 +37,26 @@ namespace MDS.Systems
             };
         }
 
+        // One line per released hold: how long it ran and what ended it. The whole mechanic rests on whether
+        // re-sending MeleeStrike sustains the chamber, so held is the number to read first.
+        public static void LogHold(int playerId, string dir, float held, string reason, float holdPays, float baitRate)
+        {
+            Logger.Log($"MeleeHold[{playerId}] dir={dir} held={held:0.00}s released={reason} " +
+                       $"holdPays={holdPays:0.00} baitRate={baitRate:0.00}", LogLevel.INFO);
+        }
+
+        // One line per cancel: where in the chain it was, how deep the chamber got, and which way the re-chamber
+        // goes. depth and dwell are the two numbers the whole mechanic is being measured for.
+        public static void LogFeint(int playerId, int index, int count, float depth, float wanted, float range,
+                                    bool wasLong, float aimOff, string fromDir, string toDir,
+                                    float longPays, float shortPays, float switchPays, float keepPays)
+        {
+            Logger.Log($"MeleeFeint[{playerId}] {index}/{count} depth={depth:0.00}s wanted={wanted:0.00}s " +
+                       $"range={range:0.00}m {(wasLong ? "long" : "short")} aimOff={aimOff:0.0} " +
+                       $"dir={fromDir}->{toDir} longPays={longPays:0.00} shortPays={shortPays:0.00} " +
+                       $"switchPays={switchPays:0.00} keepPays={keepPays:0.00}", LogLevel.INFO);
+        }
+
         // One line per tick while a swing is live. actual is where the blade points now, clamped is where we told it.
         public static void LogSwingTick(int playerId, float actual, float desired, float clamped, float turned,
                                         bool mateAcross, float gateR, float clampR, string mates)
@@ -49,7 +69,7 @@ namespace MDS.Systems
         }
 
         // One line per friendly-fire kill, in the killer's own aim frame.
-        public static void LogFriendlyFire(int killerId, int victimId, Vector2 killerPos, float killerHeading, Vector2 victimPos)
+        public static void LogFriendlyFire(int killerId, int victimId, BotAiEnum killerAi, Vector2 killerPos, float killerHeading, Vector2 victimPos)
         {
             Vector2 toVictim = victimPos - killerPos;
             float dist = toVictim.magnitude;
@@ -77,10 +97,14 @@ namespace MDS.Systems
                     r.LaneClear);
             }
 
+            // A dummy line stabbing itself is what a dummy line does, and at thousands a day it buries the
+            // handful of kills a fighting AI causes. Same line either way, so one grep still finds them all.
+            bool dummy = killerAi == BotAiEnum.StabbingDummy || killerAi == BotAiEnum.RiposteDummy;
+
             Logger.Log(
-                string.Format("FriendlyFire: {0} killed {1} | dist={2:0.00} bearing={3:0.#} along={4:0.00} lateral={5:0.00} behind={6} | {7}",
-                    killerId, victimId, dist, bearing, along, lateral, along < 0f, strike),
-                LogLevel.WARNING);
+                string.Format("FriendlyFire: {0} ({1}) killed {2} | dist={3:0.00} bearing={4:0.#} along={5:0.00} lateral={6:0.00} behind={7} | {8}",
+                    killerId, killerAi, victimId, dist, bearing, along, lateral, along < 0f, strike),
+                dummy ? LogLevel.INFO : LogLevel.WARNING);
         }
 
         // One line per tick the aim is frozen because the blade is out with nothing left to fight.
